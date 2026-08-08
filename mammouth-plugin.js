@@ -239,6 +239,10 @@
                 <div class="mw-progress-bar">
                     <div class="mw-progress-fill fill-gradient-coral" id="mw-progress-quota" style="width: 0%;"></div>
                 </div>
+                <div style="margin-top:10px; display:flex; align-items:center; justify-content:space-between; gap:8px;">
+                    <span class="mw-api-badge idle" id="mw-api-badge">API en attente</span>
+                    <span class="mw-sub-text" id="mw-api-ts">jamais synchronisé</span>
+                </div>
             </div>
 
             <div class="mw-card" id="mw-card-timer">
