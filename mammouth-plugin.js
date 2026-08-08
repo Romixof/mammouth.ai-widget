@@ -1,11 +1,7 @@
 // ==UserScript==
 // @name         Mammouth AI - Quota Tracker
 // @namespace    http://tampermonkey.net/
-<<<<<<< HEAD
 // @version      14.4.8
-=======
-// @version      14.4.7
->>>>>>> 76a5407e1db0b54ac6cc072295d1bdccdea290d8
 // @description  Quota Tracker — fenêtre glissante 3h + détection d'envoi DOM (reliable) + coût réel par requête + cercle minimisé indépendant (texte vs anneau) + calibration verrouillée + notifications + export/import.
 // @author       Romixo
 // @match        *://*.mammouth.ai/*
@@ -84,16 +80,11 @@
         }
 
         #mw-header {
-<<<<<<< HEAD
             position: sticky; top: 0; z-index: 10;
             display: flex; justify-content: space-between; align-items: center;
             padding: 14px 16px; cursor: grab; border-bottom: 1px solid rgba(255,255,255,0.06);
             background: rgba(15,15,20,0.95);
             backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
-=======
-            display: flex; justify-content: space-between; align-items: center;
-            padding: 14px 16px; cursor: grab; border-bottom: 1px solid rgba(255,255,255,0.06);
->>>>>>> 76a5407e1db0b54ac6cc072295d1bdccdea290d8
         }
         #mw-header:active { cursor: grabbing; }
         #mw-title { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; letter-spacing: -0.2px; }
@@ -193,29 +184,6 @@
         #mw-quota-status:hover { color: #a29bfe !important; transform: scale(1.05); }
         #mw-quota-status:active { transform: scale(0.95); }
 
-<<<<<<< HEAD
-=======
-        #mw-quota-lock-banner {
-            display: none; align-items: center; gap: 8px; margin-top: 10px;
-            padding: 9px 12px; border-radius: 10px; font-size: 12px; font-weight: 600;
-            background: rgba(255,71,87,0.14); border: 1px solid rgba(255,71,87,0.35); color: #ff8a93;
-            animation: mw-fade-in 0.3s ease;
-        }
-        #mw-quota-lock-banner.active { display: flex; }
-        #mw-quota-lock-banner .mw-lock-spinner { width: 12px; height: 12px; border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%; animation: mw-spin 0.9s linear infinite; }
-
-        body.mw-composer-locked textarea,
-        body.mw-composer-locked [class*="composer" i] textarea {
-            opacity: 0.5 !important; pointer-events: none !important; cursor: not-allowed !important;
-        }
-        body.mw-composer-locked button[aria-label*="envoyer" i],
-        body.mw-composer-locked button[aria-label*="send" i],
-        body.mw-composer-locked [class*="send" i],
-        body.mw-composer-locked [class*="composer" i] button[class*="primary" i] {
-            opacity: 0.4 !important; pointer-events: none !important; cursor: not-allowed !important; filter: grayscale(0.5);
-        }
-
->>>>>>> 76a5407e1db0b54ac6cc072295d1bdccdea290d8
         #mammouth-widget:not(.minimized) {
             max-height: min(720px, calc(100vh - 40px));
             overflow-y: auto;
@@ -271,17 +239,6 @@
                 <div class="mw-progress-bar">
                     <div class="mw-progress-fill fill-gradient-coral" id="mw-progress-quota" style="width: 0%;"></div>
                 </div>
-<<<<<<< HEAD
-=======
-                <div style="margin-top:10px; display:flex; align-items:center; justify-content:space-between; gap:8px;">
-                    <span class="mw-api-badge idle" id="mw-api-badge">API en attente</span>
-                    <span class="mw-sub-text" id="mw-api-ts">jamais synchronisé</span>
-                </div>
-                <div id="mw-quota-lock-banner">
-                    <span class="mw-lock-spinner"></span>
-                    <span id="mw-quota-lock-text">Quota atteint — réinitialisation dans --:--:--</span>
-                </div>
->>>>>>> 76a5407e1db0b54ac6cc072295d1bdccdea290d8
             </div>
 
             <div class="mw-card" id="mw-card-timer">
@@ -490,11 +447,6 @@
     const timerCardEl = document.getElementById('mw-card-timer');
     const miniTimeEl = document.getElementById('mw-mini-time');
     const miniRingEl = document.getElementById('mw-mini-ring');
-<<<<<<< HEAD
-=======
-    const lockBannerEl = document.getElementById('mw-quota-lock-banner');
-    const lockTextEl = document.getElementById('mw-quota-lock-text');
->>>>>>> 76a5407e1db0b54ac6cc072295d1bdccdea290d8
     const returnBtn = document.getElementById('mw-btn-return');
     const settingsPanel = document.getElementById('mw-settings');
 
@@ -653,34 +605,6 @@
         }
     }
 
-<<<<<<< HEAD
-=======
-    /* ================= VERROUILLAGE ================= */
-
-    let lockCurrentlyActive = false;
-    function applyQuotaLock(nextUnlockMs) {
-        const consumed = targetPercent;
-        const quotaReached = consumed != null && consumed >= 100;
-        const shouldLock = quotaReached && nextUnlockMs != null && nextUnlockMs > 0;
-
-        if (shouldLock) {
-            document.body.classList.add('mw-composer-locked');
-            lockBannerEl.classList.add('active');
-            const txt = `Quota atteint — réinitialisation dans ${formatHMS(nextUnlockMs)}`;
-            if (lockTextEl.innerText !== txt) lockTextEl.innerText = txt;
-            if (!lockCurrentlyActive) {
-                lockCurrentlyActive = true;
-                console.log('[MammouthWidget] Quota atteint (≥100%) — composer verrouillé.');
-            }
-        } else if (lockCurrentlyActive) {
-            document.body.classList.remove('mw-composer-locked');
-            lockBannerEl.classList.remove('active');
-            lockCurrentlyActive = false;
-            console.log('[MammouthWidget] Composer déverrouillé.');
-        }
-    }
-
->>>>>>> 76a5407e1db0b54ac6cc072295d1bdccdea290d8
     /* ================= UPDATE UI ================= */
 
     function updateUI() {
@@ -722,10 +646,6 @@
             progressTimerEl.style.width = elapsedPct.toFixed(1) + '%';
         }
 
-<<<<<<< HEAD
-=======
-        applyQuotaLock(oldestRemaining);
->>>>>>> 76a5407e1db0b54ac6cc072295d1bdccdea290d8
         updateMini(oldestRemaining, elapsedPct);
         updateApiTimestamp();
         refreshApiBadgeFromStorage();
@@ -1616,12 +1536,6 @@ let lastTrackedURL = window.location.href;
         localStorage.removeItem(STORAGE_KEY_START);
         localStorage.removeItem(STORAGE_KEY_REQUESTS);
         clearPendingRequest();
-<<<<<<< HEAD
-=======
-        document.body.classList.remove('mw-composer-locked');
-        lockBannerEl.classList.remove('active');
-        lockCurrentlyActive = false;
->>>>>>> 76a5407e1db0b54ac6cc072295d1bdccdea290d8
         updateUI();
         updateConsumptionStats();
     };
@@ -1736,12 +1650,6 @@ let lastTrackedURL = window.location.href;
             localStorage.removeItem(STORAGE_KEY_HISTORY);
             localStorage.removeItem(STORAGE_KEY_NOTIFIED);
             pendingRequest = null;
-<<<<<<< HEAD
-=======
-            document.body.classList.remove('mw-composer-locked');
-            lockBannerEl.classList.remove('active');
-            lockCurrentlyActive = false;
->>>>>>> 76a5407e1db0b54ac6cc072295d1bdccdea290d8
             updateUI();
             updateConsumptionStats();
             drawHistory();
