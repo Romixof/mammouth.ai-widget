@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mammouth AI - Quota Tracker
 // @namespace    http://tampermonkey.net/
-// @version      14.4.7
+// @version      14.4.8
 // @description  Quota Tracker — fenêtre glissante 3h + détection d'envoi DOM (reliable) + coût réel par requête + cercle minimisé indépendant (texte vs anneau) + calibration verrouillée + notifications + export/import.
 // @author       Romixo
 // @match        *://*.mammouth.ai/*
