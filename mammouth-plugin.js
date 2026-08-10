@@ -1,14 +1,14 @@
 // ==UserScript==
 // @name         Mammouth AI - Quota Tracker
 // @namespace    http://tampermonkey.net/
-// @version      14.4.9
+// @version      14.5
 // @description  Quota Tracker — fenêtre glissante 3h + détection d'envoi DOM (reliable) + coût réel par requête + cercle minimisé indépendant (texte vs anneau) + calibration verrouillée + notifications + export/import.
 // @author       Romixo
 // @match        *://*.mammouth.ai/*
 // @match        *://mammouth.ai/*
 // @grant        none
-// @updateURL    https://raw.githubusercontent.com/Romixof/mammouth.ai-widget/main/mammouth-plugin.js
-// @downloadURL  https://raw.githubusercontent.com/Romixof/mammouth.ai-widget/main/mammouth-plugin.js
+// @updateURL    https://raw.githubusercontent.com/Romixof/mammouth.ai-widget/main/mammouth-plugin.user.js
+// @downloadURL  https://raw.githubusercontent.com/Romixof/mammouth.ai-widget/main/mammouth-plugin.user.js
 // @license      MIT
 // ==/UserScript==
 
@@ -1783,5 +1783,6 @@ let lastTrackedURL = window.location.href;
         setInterval(() => { if (document.hidden) extensionTick(); }, 30000);
     }
 
-    console.log('[MammouthWidget] v14.4.7 chargé — détection DOM + cercle minimisé indépendant (texte vs anneau) + coût réel.');
+    console.log('[MammouthWidget] v14.4.9 chargé — détection DOM + cercle minimisé indépendant (texte vs anneau) + coût réel.');
 })();
+ 

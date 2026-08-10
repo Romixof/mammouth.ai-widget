@@ -23,7 +23,7 @@ A Tampermonkey userscript for tracking your Mammouth AI quota usage in real-time
 ## Installation
 
 1. Install [Tampermonkey](https://www.tampermonkey.net/) browser extension
-2. Click [here to install](https://raw.githubusercontent.com/Romixof/mammouth.ai-widget/main/mammouth-plugin.js) (or manually create a new script and paste the code)
+2. Click [here to install](https://raw.githubusercontent.com/Romixof/mammouth.ai-widget/main/mammouth-plugin.user.js) (or manually create a new script and paste the code)
 3. Visit [mammouth.ai](https://mammouth.ai/app) — widget appears bottom-right
 
 ## Usage
