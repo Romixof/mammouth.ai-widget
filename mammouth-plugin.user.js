@@ -771,8 +771,23 @@
 
     /* ================= SCAN DOM ================= */
 
+    const QUOTA_BAR_SELECTORS = [
+        '[aria-label="Utilisation du quota"]',
+        '[aria-label="Quota usage"]',
+        '[aria-label="Quota utilization"]',
+        '[aria-label="Usage du quota"]',
+    ];
+
+    function findQuotaBar(root) {
+        for (const selector of QUOTA_BAR_SELECTORS) {
+            const el = root.querySelector(selector);
+            if (el) return el;
+        }
+        return null;
+    }
+
     function scanDomForPercent() {
-        const quotaBar = document.querySelector('[aria-label="Utilisation du quota"]');
+        const quotaBar = findQuotaBar(document);
         if (quotaBar) {
             const percent = quotaBar.getAttribute('aria-valuenow');
             if (percent) {
@@ -1311,7 +1326,7 @@
     /* ================= FONCTIONS HISTORIQUES RESTAURÉES ================= */
 
     function readQuotaFromDOM(root) {
-        const quotaBar = root.querySelector('[aria-label="Utilisation du quota"]');
+        const quotaBar = findQuotaBar(root);
         if (!quotaBar) return null;
         const percent = quotaBar.getAttribute('aria-valuenow');
         let p = null;
@@ -1783,6 +1798,6 @@ let lastTrackedURL = window.location.href;
         setInterval(() => { if (document.hidden) extensionTick(); }, 30000);
     }
 
-    console.log('[MammouthWidget] v14.4.9 chargé — détection DOM + cercle minimisé indépendant (texte vs anneau) + coût réel.');
+    console.log('[MammouthWidget] v14.5 chargé — détection DOM + cercle minimisé indépendant (texte vs anneau) + coût réel.');
 })();
  
