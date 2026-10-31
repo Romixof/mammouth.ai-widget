@@ -1,7 +1,8 @@
 // ==UserScript==
 // @name         Mammouth AI - Quota Tracker
-// @version      14.22
-// @description  Quota Tracker pour mammouth.ai — suivi du quota (fenêtre glissante 3h), quota par modèle, simulateur de récupération.
+// @namespace    http://tampermonkey.net/
+// @version      15.17
+// @description  Quota Tracker mammouth.ai — quota global (pool), fenêtre glissante 3h en base TEMPS, quota par modèle.
 // @author       Romixo
 // @match        *://*.mammouth.ai/*
 // @match        *://mammouth.ai/*
@@ -20,7 +21,7 @@
 (function () {
     'use strict';
 
-    /* ================= STYLES ================= */
+    // Styles
     const style = document.createElement('style');
     style.innerHTML = `
         @keyframes mw-shimmer { 0% { left: -150%; } 100% { left: 150%; } }
@@ -195,6 +196,10 @@
         .mw-stat { padding: 9px; border-radius: 10px; background: rgba(255,255,255,0.045); border: 1px solid rgba(255,255,255,0.06); }
         .mw-stat-label { font-size: 9px; color: #888; text-transform: uppercase; letter-spacing: .4px; margin-bottom: 4px; }
         .mw-stat-value { color: #ddd; font-size: 12px; font-weight: 700; }
+        .mw-stat-wide { grid-column: 1 / -1; }
+        .mw-stat-wide .mw-stat-value { color: #b8b8c0; font-size: 11px; font-weight: 600; line-height: 1.45; }
+        .mw-stat-wide.warn .mw-stat-value { color: #ffa502; }
+        .mw-stat-wide.warn .mw-stat-label { color: #ffa502; }
         .mw-setting-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; padding-top: 8px; }
         #mw-history-canvas { display: block; width: 100%; height: 52px; margin-top: 10px; }
         #mw-import-file { display: none; }
@@ -209,7 +214,6 @@
         #mw-card-consumption.collapsed { padding-top: 12px; padding-bottom: 12px; }
         #mw-card-consumption.collapsed .mw-consumption-content { max-height: 0; opacity: 0; padding-top: 0; }
 
-        /* ================= SIDEBAR UI (alternative) ================= */
         #mw-sidebar {
             position: fixed; right: 10px; top: 50%; transform: translateY(-50%);
             display: flex; flex-direction: column; align-items: center; gap: 12px;
@@ -230,8 +234,8 @@
         .mw-sb-dot { position: absolute; top: -2px; right: -2px; width: 10px; height: 10px; border-radius: 50%; border: 2px solid rgba(15,15,20,0.94); display: none; }
         .mw-sb-dot.on { display: block; }
         #mw-popover {
-            position: fixed; right: 76px; top: 50%; transform: translateY(-50%);
-            width: 300px; max-width: calc(100vw - 96px);
+            position: fixed; right: 90px; top: 50%; transform: translateY(-50%);
+            width: 300px; max-width: calc(100vw - 108px);
             background: rgba(15,15,20,0.98); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
             border: 1px solid rgba(255,255,255,0.10); border-radius: 20px;
             box-shadow: 0 18px 50px rgba(0,0,0,0.75), inset 0 1px 0 rgba(255,255,255,0.08);
@@ -245,6 +249,10 @@
         .mw-pop-header { display: flex; align-items: center; justify-content: space-between; padding-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.07); margin-bottom: 12px; gap: 8px; }
         .mw-pop-title { display: flex; align-items: center; gap: 8px; font-size: 17px; font-weight: 800; letter-spacing: -0.3px; color: #fff; }
         .mw-pop-time { font-size: 12px; color: #e0e0e6; font-weight: 700; letter-spacing: 0.1px; }
+
+        .mw-pop-sync { font-size: 10px; color: #7a7a86; font-weight: 600; white-space: nowrap; }
+        .mw-pop-sync::before { content: '●'; margin-right: 4px; font-size: 7px; vertical-align: 1px; color: #4a9d5a; }
+        .mw-pop-sync.syncing::before { color: #a29bfe; animation: mw-pulse 0.9s infinite; }
         .mw-pop-gear { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08); color: #b8b8c0; width: 28px; height: 28px; border-radius: 8px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0; transition: background 0.2s, color 0.2s; }
         .mw-pop-gear:hover { background: rgba(255,255,255,0.12); color: #fff; }
         .mw-pop-section { padding: 11px 11px 10px; border-radius: 14px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06); margin-bottom: 10px; }
@@ -252,12 +260,31 @@
         .mw-pop-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
         .mw-pop-label { font-size: 12.5px; font-weight: 700; color: #f0f0f0; letter-spacing: -0.1px; display: flex; align-items: center; gap: 6px; }
         .mw-pop-reset { font-size: 11px; color: #b0b0b8; font-weight: 600; white-space: nowrap; }
-        .mw-pop-bar { width: 100%; height: 6px; background: rgba(255,255,255,0.09); border-radius: 999px; overflow: visible; margin-top: 8px; position: relative; }
+        .mw-pop-bar { width: 100%; height: 7px; background: rgba(255,255,255,0.09); border-radius: 999px; overflow: visible; margin-top: 10px; position: relative; }
+
+        .mw-pop-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 9px; min-height: 17px; }
+        .mw-pop-pct { font-size: 12px; font-weight: 700; color: #f0f0f0; letter-spacing: -0.1px; }
+        .mw-pop-note {
+            font-size: 10px; font-weight: 600; color: #8a8a95; letter-spacing: 0.1px;
+            background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 999px; padding: 2px 7px; white-space: nowrap; line-height: 1.5;
+        }
+        .mw-pop-note.warn { color: #ffa502; background: rgba(255,165,2,0.10); border-color: rgba(255,165,2,0.26); }
+        .mw-pop-note:empty { display: none; }
         .mw-pop-fill { height: 100%; border-radius: 999px; transition: width 0.6s cubic-bezier(0.34,1.56,0.64,1), background 0.3s; position: relative; }
-        .mw-pop-fill::after { content: ''; position: absolute; right: -5px; top: 50%; transform: translateY(-50%); width: 10px; height: 10px; border-radius: 50%; background: inherit; border: 2px solid rgba(15,15,20,0.98); box-shadow: 0 1px 4px rgba(0,0,0,0.4); opacity: 0; transition: opacity 0.2s; }
+        .mw-pop-fill::after { content: ''; position: absolute; right: -5px; top: 50%; transform: translateY(-50%); width: 11px; height: 11px; border-radius: 50%; background: inherit; border: 2px solid rgba(15,15,20,0.98); box-shadow: 0 1px 5px rgba(0,0,0,0.45); opacity: 0; transition: opacity 0.2s; }
         .mw-pop-fill[style*="width: 0%"]::after { opacity: 0; }
         .mw-pop-fill:not([style*="width: 0%"])::after { opacity: 1; }
         .mw-pop-used { font-size: 11px; color: #b0b0b8; margin-top: 6px; font-weight: 600; }
+        .mw-pop-used.warn { color: #ffa502; }
+
+        .mw-dot {
+            display: inline-block; width: 3px; height: 3px; border-radius: 50%;
+            background: #6a6a78; margin: 0 7px; vertical-align: middle;
+            position: relative; top: -1px;
+        }
+        .mw-pop-used.stale, .stale { color: #ffa502; }
+        .mw-pop-reset.stale { color: #ffa502; }
         .mw-pop-select { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.10); color: #e0e0e6; font-size: 11px; font-weight: 600; border-radius: 7px; padding: 3px 6px; max-width: 130px; font-family: inherit; cursor: pointer; }
         .mw-pop-select:focus { outline: none; border-color: rgba(162,155,254,0.5); }
         .mw-pop-select option { background: #1a1a20; }
@@ -269,8 +296,16 @@
         .mw-model-block:last-child { margin-bottom:0; }
         .mw-model-head { display:flex; justify-content:space-between; align-items:center; gap:8px; }
         .mw-model-name { font-size:12px; font-weight:700; color:#f0f0f0; }
-        .mw-model-pct { font-size:11px; font-weight:700; color:#ffa502; }
+        .mw-model-pct { font-size:11px; font-weight:700; color:#ffa502; white-space:nowrap; }
+        .mw-model-pct.warn { color:#ff6b6b; }
+        .mw-model-right { display:inline-flex; align-items:center; gap:5px; flex:0 0 auto; }
+
+        .mw-model-age { margin-top:5px; font-size:9.5px; color:#6b6b78; font-weight:600; letter-spacing:0.1px; }
         .mw-model-block.mw-enter { animation: mw-fade-rise 0.45s cubic-bezier(0.22,1,0.36,1) both; }
+
+        .mw-model-block.mw-over { border-color: rgba(255,71,87,0.45); }
+        .mw-model-block.mw-over .mw-pop-fill { background: repeating-linear-gradient(135deg, #ff4757 0px, #ff4757 5px, #ff6b81 5px, #ff6b81 10px) !important; }
+        .mw-model-block.mw-over .mw-model-pct, .mw-model-block.mw-over .mw-pop-used { color: #ff4757; }
         @keyframes mw-bump { 0% { transform: scale(1); } 35% { transform: scale(1.28); color: #2ed573; } 100% { transform: scale(1); } }
         .mw-bump { animation: mw-bump 0.55s ease; display: inline-block; }
         .mw-model-logo { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; box-shadow: 0 1px 4px rgba(0,0,0,0.45); flex: 0 0 auto; }
@@ -302,7 +337,7 @@
     document.getElementById('mw-sidebar')?.remove();
     document.getElementById('mw-popover')?.remove();
 
-    /* ================= WIDGET ================= */
+    // Widget
     const widget = document.createElement('div');
     widget.id = 'mammouth-widget';
     widget.innerHTML = `
@@ -342,6 +377,15 @@
                 </div>
             </div>
 
+            <div class="mw-card" id="mw-card-models">
+                <div class="mw-label">
+                    <span>Quota par modèle</span>
+                    <span class="mw-sub-text" id="mw-widget-models-reset" style="margin:0">—</span>
+                </div>
+                <div id="mw-widget-models" style="margin-top:8px"></div>
+                <button class="mw-btn" id="mw-widget-fetch-models" style="width:100%;margin-top:10px;padding:8px;font-size:11px" title="Un seul clic : une petite fenêtre s'ouvre en bas à droite, clique la section Quota toute seule, lit les jauges par modèle puis se ferme (~15–30 s). Ta page et ton travail restent intacts.">📥 Récupérer les quotas par modèle</button>
+            </div>
+
             <div class="mw-card" id="mw-card-sim">
                 <div class="mw-label">
                     <span>🔮 Simulateur · <span id="mw-sim-offset">maintenant</span></span>
@@ -374,6 +418,10 @@
                 <div class="mw-setting-row">
                     <label>Simuler requête</label>
                     <button class="mw-btn-sm" id="mw-btn-simulate">Test timer</button>
+                </div>
+                <div class="mw-setting-row">
+                    <label title="Le quota par modèle se relit tout seul ~12 s après chaque réponse (petite fenêtre qui s'ouvre et se ferme). Désactiver si tu préfères ne lire les quotas par modèle qu'à la demande.">Modèles auto</label>
+                    <button class="mw-btn-sm" id="mw-btn-model-auto">Auto</button>
                 </div>
                 <div class="mw-setting-row">
                     <label>Notifications</label>
@@ -416,22 +464,22 @@
     `;
     document.body.appendChild(widget);
 
-    /* ================= SIDEBAR POPOVER (alternative UI) ================= */
+    // Sidebar et popover
     const sidebar = document.createElement('div');
     sidebar.id = 'mw-sidebar';
     sidebar.className = 'mw-hidden';
     sidebar.innerHTML = `
-        <div class="mw-sb-item" id="mw-sb-1" title="Session en cours">
+        <div class="mw-sb-item" id="mw-sb-1" title="Quota global (fenêtre 3h)">
             <svg viewBox="0 0 52 52"><circle cx="26" cy="26" r="20" fill="none" stroke="rgba(255,255,255,0.12)" stroke-width="4"/><circle id="mw-sb-ring-1" cx="26" cy="26" r="20" fill="none" stroke="#ff6b6b" stroke-width="4" stroke-linecap="round" stroke-dasharray="125.66" stroke-dashoffset="125.66" transform="rotate(-90 26 26)"/></svg>
             <div class="mw-sb-center"><span class="mw-sb-icon">✦</span><span class="mw-sb-pct" id="mw-sb-pct-1">—</span></div>
             <span class="mw-sb-dot" id="mw-sb-dot-1" style="background:#ff6b6b"></span>
         </div>
-        <div class="mw-sb-item" id="mw-sb-2" title="Fenêtre glissante">
+        <div class="mw-sb-item" id="mw-sb-2" title="Fenêtre glissante — consommation réelle (3 h, réconciliée avec le site)">
             <svg viewBox="0 0 52 52"><circle cx="26" cy="26" r="20" fill="none" stroke="rgba(255,255,255,0.12)" stroke-width="4"/><circle id="mw-sb-ring-2" cx="26" cy="26" r="20" fill="none" stroke="#2ed573" stroke-width="4" stroke-linecap="round" stroke-dasharray="125.66" stroke-dashoffset="125.66" transform="rotate(-90 26 26)"/></svg>
             <div class="mw-sb-center"><span class="mw-sb-icon">◈</span><span class="mw-sb-pct" id="mw-sb-pct-2">—</span></div>
             <span class="mw-sb-dot" id="mw-sb-dot-2" style="background:#2ed573"></span>
         </div>
-        <div class="mw-sb-item" id="mw-sb-3" title="Quota journalier">
+        <div class="mw-sb-item" id="mw-sb-3" title="Modèle le plus strained (quota par modèle)">
             <svg viewBox="0 0 52 52"><circle cx="26" cy="26" r="23" fill="none" stroke="rgba(255,255,255,0.14)" stroke-width="3"/><circle id="mw-sb-ring-3" cx="26" cy="26" r="23" fill="none" stroke="#ffa502" stroke-width="3" stroke-linecap="round" stroke-dasharray="144.51" stroke-dashoffset="144.51" transform="rotate(-90 26 26)"/></svg>
             <div class="mw-sb-center"><span class="mw-sb-icon" id="mw-sb-icon-3">◐</span><span class="mw-sb-pct" id="mw-sb-pct-3">—</span><span class="mw-sb-logo" id="mw-sb-logo-3"></span></div>
             <span class="mw-sb-dot" id="mw-sb-dot-3" style="background:#ffa502"></span>
@@ -445,20 +493,27 @@
         <div class="mw-pop-header">
             <div class="mw-pop-title"><span style="color:#ff6b6b">✦</span> Mammouth</div>
             <div style="display:flex;align-items:center;gap:8px">
+                <span class="mw-pop-sync" id="mw-pop-sync" title="Dernière lecture du quota par le site">·</span>
                 <span class="mw-pop-time" id="mw-pop-time">--:--</span>
                 <button class="mw-pop-gear" id="mw-pop-gear" title="Paramètres">⚙</button>
             </div>
         </div>
+        <div class="mw-pop-used warn" id="mw-pop-total-warning" style="display:none;margin-bottom:10px"></div>
+        <div class="mw-pop-used warn" id="mw-pop-blocked" style="display:none;margin-bottom:10px"></div>
         <div class="mw-pop-section">
-            <div class="mw-pop-row"><span class="mw-pop-label">Session en cours</span><span class="mw-pop-reset" id="mw-pop-reset-1">—</span></div>
+            <div class="mw-pop-row"><span class="mw-pop-label">Quota global</span></div>
             <div class="mw-pop-bar"><div class="mw-pop-fill" id="mw-pop-fill-1" style="width:0%; background: linear-gradient(90deg,#ff6b6b,#ff8e53)"></div></div>
-            <div class="mw-pop-used" id="mw-pop-used-1">—</div>
+            <div class="mw-pop-foot"><span class="mw-pop-pct" id="mw-pop-used-1">—</span></div>
         </div>
         <div class="mw-pop-section">
             <div class="mw-pop-row"><span class="mw-pop-label">Fenêtre glissante</span><span class="mw-pop-reset" id="mw-pop-reset-2">—</span></div>
             <div class="mw-pop-bar"><div class="mw-pop-fill" id="mw-pop-fill-2" style="width:0%; background: linear-gradient(90deg,#2ed573,#7bed9f)"></div></div>
-            <div class="mw-pop-used" id="mw-pop-used-2">—</div>
-            <div class="mw-pop-used" id="mw-pop-sim-hint" style="color:#8f8f98">—</div>
+            <div class="mw-pop-foot"><span class="mw-pop-pct" id="mw-pop-used-2">—</span></div>
+        </div>
+        <div class="mw-pop-section">
+            <div class="mw-pop-row"><span class="mw-pop-label">Modèle le plus strained</span><span class="mw-pop-reset" id="mw-pop-reset-3">—</span></div>
+            <div class="mw-pop-bar"><div class="mw-pop-fill" id="mw-pop-fill-3" style="width:0%; background: linear-gradient(90deg,#ffa502,#ffc048)"></div></div>
+            <div class="mw-pop-foot"><span class="mw-pop-pct" id="mw-pop-used-3">—</span></div>
         </div>
         <div class="mw-pop-models-wrap" style="margin-top:10px">
             <div class="mw-pop-row" style="margin-bottom:8px">
@@ -469,11 +524,8 @@
                 </span>
             </div>
             <div id="mw-pop-models"></div>
-            <div style="display:flex;align-items:center;gap:6px;margin-top:6px">
-                <select class="mw-pop-select" id="mw-pop-model-select" title="Aperçu modèle non utilisé" style="flex:1;max-width:100%"><option value="">— Aperçu autre modèle —</option></select>
-            </div>
-            <div class="mw-pop-used" id="mw-pop-used-preview" style="display:none"></div>
         </div>
+        <button class="mw-btn-sm" id="mw-pop-fetch-models" style="width:100%;margin-top:10px;padding:8px;font-size:11px" title="Un seul clic : une petite fenêtre s'ouvre en bas à droite, clique la section Quota toute seule, lit les jauges par modèle puis se ferme (~15–30 s). Ta page et ton travail restent intacts.">📥 Récupérer les quotas par modèle</button>
         <div class="mw-pop-footer">
             <button class="mw-btn-sm mw-btn-primary-sm" id="mw-pop-refresh">Rafraîchir ♻️</button>
             <button class="mw-btn-sm" id="mw-pop-close">Fermer</button>
@@ -481,11 +533,12 @@
     `;
     document.body.appendChild(popover);
 
-    /* ================= CONSTANTES ================= */
+    // Constantes
     const WINDOW_MS = 3 * 60 * 60 * 1000;
     const API_URL = 'https://mammouth.ai/api/user/recentUsage';
     const CURRENT_USAGE_URL = '/api/user/currentUsage';
     const API_INTERVAL_MS = 5 * 60 * 1000;
+    const POOL_POLL_MS = 60 * 1000;
     const RING_CIRC = 2 * Math.PI * 27;
     const DRAG_THRESHOLD = 4;
 
@@ -519,6 +572,7 @@
     const STORAGE_KEY_LOGO_MODE = 'mammouth_model_show_logo';
     const STORAGE_KEY_REQUESTS = 'mammouth_sliding_requests';
     const STORAGE_KEY_SPEND_CENTS = 'mammouth_current_spend_cents';
+    const STORAGE_KEY_SPEND_TS = 'mammouth_current_spend_ts';
     const STORAGE_KEY_THRESHOLD_CENTS = 'mammouth_threshold_cents';
     const STORAGE_KEY_HISTORY = 'mammouth_quota_history';
     const STORAGE_KEY_NOTIFY = 'mammouth_notifications_enabled';
@@ -526,10 +580,120 @@
     const STORAGE_KEY_RAW_USED_CACHE = 'mammouth_raw_used_cache';
     const STORAGE_KEY_RAW_USED_CACHE_TS = 'mammouth_raw_used_cache_ts';
     const STORAGE_KEY_PENDING_REQUEST = 'mammouth_pending_request';
+    const STORAGE_KEY_PENDING_QUEUE = 'mammouth_pending_queue';
+    const STORAGE_KEY_LEDGER_CLEARED = 'mammouth_ledger_cleared_ts';
     const STORAGE_KEY_LAST_CALIBRATION = 'mammouth_last_calibration';
-    const HISTORY_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+    const STORAGE_KEY_CALIB_STATE = 'mammouth_calibrator_state';
+    const STORAGE_KEY_MODEL_QUOTA = 'mammouth_model_quota';
+    const STORAGE_KEY_MODEL_MISSES = 'mammouth_model_quota_misses';
+    const STORAGE_KEY_SCHEMA = 'mammouth_schema_version';
+    const STORAGE_KEY_PLAN_REFUSED = 'mammouth_plan_pool_refused';
+    const STORAGE_KEY_SOURCE_LOG = 'mammouth_source_log';
+    const STORAGE_KEY_POOL_SOURCE = 'mammouth_pool_source';
+    const STORAGE_KEY_MODEL_AUTO = 'mammouth_model_auto_refresh';
+
+    const HISTORY_RETENTION_MS = 24 * 60 * 60 * 1000;
     const RAW_USED_CACHE_TTL_MS = 2 * 60 * 1000;
     const CALIBRATION_COOLDOWN_MS = 10000;
+    const SCHEMA_VERSION = 2;
+
+    // Config
+    const CFG = {
+        windowMs: WINDOW_MS,
+        apiIntervalMs: API_INTERVAL_MS,
+
+        modelTtlMs: 30 * 60 * 1000,
+        modelRemoveAfterMisses: 2,
+
+        modelFreshMs: 2 * 60 * 60 * 1000,
+
+        ledgerMaxEntries: 500,
+        ledgerPruneMs: 5000,
+
+        calibSettleReads: 2,
+        calibSettleGapMs: 4000,
+        calibMaxRetries: 3,
+        calibRetryBackoffMs: 30000,
+        calibMaxSpread: 1.5,
+
+        poolGuardMs: 20000,
+        poolImplausibleFloor: 2.5,
+        poolImplausibleRel: 0.6,
+
+        popupFailsafeMs: 90000,
+        popupGrowthQuietMs: 6000,
+        popupStableTicks: 3,
+        popupMaxAssists: 10,
+        popupAssistGapMs: 2300,
+        popupFirstAssistMs: 2200,
+        popupRelocateMinMs: 18000,
+        popupRelocateMaxMs: 45000,
+        popupRelocateIdleMs: 6000,
+        popupProbeStepMs: 60,
+
+        poolPollMs: 60000,
+        modelAutoMinGapMs: 180000,
+        modelAutoStaleMs: 240000,
+        modelAutoDelayMs: 12000,
+        resolveMaxTries: 4,
+        resolveTimeoutMs: 20000,
+        calibSoftRetryMs: 4000,
+        calibSoftLogMs: 120000,
+        calibSoftExpireMs: 15 * 60 * 1000,
+
+        calibAmbigGraceMs: 90 * 1000,
+
+        popupBrandPhaseMs: 7000,
+        popupBrandReadMs: 1400,
+        popupBrandRestoreMs: 800,
+
+        gaugeCacheMs: 300,
+        nameMapCacheMs: 500,
+        officialSectionCacheMs: 5000,
+        lightTickMs: 1000,
+        heavyTickMs: 5000,
+        harvestJournalMax: 12,
+    };
+
+    // Plafond par plan
+    const PLAN_POOL_CENTS = { standard: 450 };
+    const PLAN_POOL_TOLERANCE = 0.12;
+    function getRefusedPlans() {
+        const r = readJSON(STORAGE_KEY_PLAN_REFUSED, []);
+        return Array.isArray(r) ? r : [];
+    }
+    function refusePlanPoolIfDivergent(newTotal) {
+        if (!(newTotal > 0)) return;
+        const list = getRefusedPlans();
+        let changed = false;
+        for (const [pl, pool] of Object.entries(PLAN_POOL_CENTS)) {
+            if (Math.abs(newTotal - pool) > pool * PLAN_POOL_TOLERANCE && !list.includes(pl)) { list.push(pl); changed = true; }
+        }
+        if (changed) localStorage.setItem(STORAGE_KEY_PLAN_REFUSED, JSON.stringify(list));
+    }
+
+    function healTotalFromPlan(spendCents, plan) {
+        const pool = PLAN_POOL_CENTS[plan];
+        if (!pool) return null;
+        const refused = getRefusedPlans();
+        if (refused.includes(plan)) return null;
+        if (!(spendCents > 0) || spendCents >= pool) return null;
+        const total = numberOrNull(localStorage.getItem(STORAGE_KEY_QUOTA_TOTAL));
+        if (total === null || !(total > 0)) {
+
+            const pct = POOL.commit({ usedCents: spendCents, totalCents: pool, source: 'plan:' + plan });
+            console.log('[MammouthWidget] total initialisé depuis le plan ' + plan + ' (' + pool + '¢) → ' + pct + '%');
+            return pct;
+        }
+
+        if (Math.abs(total - pool) > pool * PLAN_POOL_TOLERANCE) {
+            POOL.flagTotalWarning('Total calibré (' + fmtCentsFr(total) + ') très loin du plan ' + plan
+                + ' (' + fmtCentsFr(pool) + ') — lance « Calibrer » pour réaligner.');
+            console.log('[MammouthWidget] ⚠ total ' + fmtCentsFr(total) + ' vs plan ' + plan + ' ' + fmtCentsFr(pool)
+                + ' — signalé (v14.37 écrasait silencieusement ici, ce qui cassait la calibration)');
+        }
+        return null;
+    }
     const PURE_BRAND_KEYS = new Set(['grok','claude','anthropic','xai','openai','gpt','chatgpt','google','gemini','meta','llama','deepseek','mistral','kimi','minimax','qwen','mammouth']);
     function isPureBrandKey(k) { return PURE_BRAND_KEYS.has(String(k || '').trim().toLowerCase()); }
     function isJunkModelKey(k) {
@@ -538,106 +702,204 @@
         return /d['’]utilisation/i.test(s) || /cliquez\s+pour\s+filtrer/i.test(s);
     }
 
-    /* ================= MÉMOIRE ANTI-EFFACEMENT de la liste par modèle ================= */
+    // Modèles
 
-    function displayableModelNames(map) {
-        return Object.keys(map || {}).filter(k =>
-            k !== k.toLowerCase() && /^[A-Z]/.test(k) && !isJunkModelKey(k) && Number.isFinite(map[k]));
+    const GENERIC_TITLE_RE = /utilisation|quota|^total\b|usage|semaine|week|mois|month|cette\b|pool|globale|générale|generale|laboratoire|labo|consommation|conso\b|crédit|credit|fenêtre|glissante|session|réinit|reinit/i;
+
+    function isDisplayableModelKey(k) {
+        const s = String(k == null ? '' : k).replace(/\s+/g, ' ').trim();
+        if (!s) return false;
+        if (isJunkModelKey(s)) return false;
+        if (GENERIC_TITLE_RE.test(s)) return false;
+        return /[a-zà-ÿ]/i.test(s);
     }
+    function displayableModelNames(map) {
+        return Object.keys(map || {}).filter(k => isDisplayableModelKey(k) && Number.isFinite(pctOf(map[k])));
+    }
+
+    function pctOf(v) {
+        if (v && typeof v === 'object') return numberOrNull(v.pct != null ? v.pct : v.value);
+        return numberOrNull(v);
+    }
+
     function normalizeModelMap(raw) {
         const out = {};
         if (!raw || typeof raw !== 'object') return out;
-        for (const [k, v] of Object.entries(raw)) {
-            const pct = numberOrNull(v);
-            if (pct === null || pct < 0 || pct > 100) continue;
-            let name = String(k || '').replace(/\s+/g, ' ').trim();
-            if (!name || isJunkModelKey(name)) continue;
+
+        const best = new Map();
+        for (const [k0, v] of Object.entries(raw)) {
+            const pct = pctOf(v);
+            if (pct === null || pct < 0 || pct > 1000) continue;
+            const key = String(k0 || '').replace(/\s+/g, ' ').trim();
+            if (!key) continue;
+            const low = key.toLowerCase();
+            const isLowerAlias = key === low;
+            const prev = best.get(low);
+            if (!prev || (prev.isLowerAlias && !isLowerAlias)) {
+                best.set(low, { key, pct, isLowerAlias });
+            }
+        }
+        for (const { key, pct } of best.values()) {
+            let name = key;
             if (/^[a-z0-9]/.test(name)) {
                 const pretty = beautifyModelName(name);
-                if (pretty && !isJunkModelKey(pretty)) name = pretty;
+                if (pretty) name = pretty;
             }
-            if (!name || isJunkModelKey(name) || GENERIC_TITLE_RE.test(name)) continue;
-            out[name] = Math.max(0, Math.min(100, Math.round(pct)));
+            if (!isDisplayableModelKey(name)) continue;
+
+            out[name] = Math.max(0, Math.min(1000, Math.round(pct)));
         }
         return out;
     }
+
     function journalHarvest(entry) {
         try {
             const j = readJSON(STORAGE_KEY_HARVEST_JOURNAL, []);
             j.push(entry);
-            while (j.length > 12) j.shift();
+            while (j.length > CFG.harvestJournalMax) j.shift();
             localStorage.setItem(STORAGE_KEY_HARVEST_JOURNAL, JSON.stringify(j));
         } catch {}
     }
+
+    function readModelEnvelope() {
+        const raw = readJSON(STORAGE_KEY_MODEL_QUOTA, null);
+        if (raw && typeof raw === 'object' && raw.models && typeof raw.models === 'object') {
+            const models = {};
+            for (const [k, v] of Object.entries(raw.models)) {
+                const pct = pctOf(v);
+                if (pct === null) continue;
+                models[k] = {
+                    pct: Math.max(0, Math.min(1000, Math.round(pct))),
+                    lastSeen: numberOrNull(v && v.lastSeen) || numberOrNull(raw.ts) || 0,
+                    hits: (v && typeof v.hits === 'object' && v.hits) ? v.hits : {},
+                };
+            }
+            return {
+                v: 1,
+                ts: numberOrNull(raw.ts) || 0,
+                source: typeof raw.source === 'string' ? raw.source : '?',
+                complete: raw.complete === true,
+                confidence: numberOrNull(raw.confidence) || 0.4,
+                models,
+            };
+        }
+        return { v: 1, ts: 0, source: 'vide', complete: false, confidence: 0, models: {} };
+    }
+
+    function modelEntries() {
+        const env = readModelEnvelope();
+        const now = Date.now();
+        const out = [];
+        for (const [k, v] of Object.entries(env.models)) {
+            if (!isDisplayableModelKey(k)) continue;
+            if (now - (v.lastSeen || 0) > CFG.modelFreshMs) continue;
+            out.push({ name: k, pct: v.pct, lastSeen: v.lastSeen || 0 });
+        }
+        out.sort((a, b) => b.pct - a.pct);
+        return out;
+    }
+
+    function modelPctMap() {
+        const out = {};
+        for (const e of modelEntries()) out[e.name] = e.pct;
+        return out;
+    }
+    function modelNames() { return modelEntries().map(e => e.name); }
+    function modelStale() {
+        const es = modelEntries();
+        if (!es.length) return true;
+
+        let oldest = Infinity;
+        for (const e of es) if (e.lastSeen < oldest) oldest = e.lastSeen;
+        return !oldest || (Date.now() - oldest) > CFG.modelTtlMs;
+    }
+
+    function modelEntryAgeLabel(lastSeen) {
+        const s = Math.max(0, Math.round((Date.now() - (lastSeen || 0)) / 1000));
+        if (s < 90) return 'à l\'instant';
+        if (s < 3600) return 'relevé il y a ' + Math.round(s / 60) + ' min';
+        if (s < 86400) return 'relevé il y a ' + Math.round(s / 3600) + ' h';
+        return 'relevé il y a ' + Math.round(s / 86400) + ' j';
+    }
+    function modelAgeLabel() {
+        const env = readModelEnvelope();
+        if (!env.ts) return 'jamais mesuré';
+        const s = Math.max(0, Math.round((Date.now() - env.ts) / 1000));
+        if (s < 60) return 'relevé à l\'instant';
+        if (s < 3600) return 'relevé il y a ' + Math.round(s / 60) + ' min';
+        return 'relevé il y a ' + Math.round(s / 3600) + ' h';
+    }
+
     function storeModelPct(nextRaw, source, opts) {
         try {
-            const authoritative = !!(opts && opts.authoritative);
-            const next = normalizeModelMap(nextRaw);
-            const nextNames = displayableModelNames(next);
-            const now0 = Date.now();
-            const prev0 = readJSON(STORAGE_KEY_MODEL_PCT, {});
-            const prev0Names = displayableModelNames(prev0);
-            if (!nextNames.length) {
-                if (authoritative && prev0Names.length) {
-                    localStorage.setItem(STORAGE_KEY_MODEL_PCT, JSON.stringify({}));
-                    localStorage.setItem(STORAGE_KEY_MODEL_PCT_SEEN, JSON.stringify({}));
-                    localStorage.setItem(STORAGE_KEY_MODEL_PCT_TS, String(now0));
-                    journalHarvest({ ts: now0, source, action: 'purge (section « Quota par modèle » vue vide)', avant: prev0Names, apres: [] });
-                    console.log('[MammouthWidget] modèles (' + source + ') : section officielle VIDE → purge de ' + prev0Names.length + ' ancien(s) modèle(s)');
-                    return true;
+            const o = opts || {};
+            const incoming = normalizeModelMap(nextRaw);
+            const incomingNames = displayableModelNames(incoming);
+            const now = Date.now();
+            const prev = readModelEnvelope();
+            const prevNames = Object.keys(prev.models).filter(isDisplayableModelKey);
+            const complete = o.complete === true;
+
+            if (!incomingNames.length) {
+
+                if (complete && prevNames.length) {
+                    const misses = readModelMisses();
+                    if (Object.keys(misses).length) {
+                        localStorage.setItem(STORAGE_KEY_MODEL_MISSES, JSON.stringify({}));
+                    }
+                    console.log('[MammouthWidget] modèles (' + source + ') : scan complet VIDE — '
+                        + prevNames.length + ' modèle(s) conservé(s) (purge seulement après '
+                        + CFG.modelRemoveAfterMisses + ' scans complets consécutifs)');
+                } else {
+                    console.log('[MammouthWidget] store (' + source + ') : scan partiel vide — stockage intact');
                 }
-                console.log('[MammouthWidget] store (' + source + ') : aucun modèle affichable → stockage intact');
                 return false;
             }
-            const prev = prev0;
-            const prevNames = prev0Names;
-            let action = 'remplace';
-            let final = next;
-            if (authoritative && prevNames.length && nextNames.length < prevNames.length) {
-                const removed = prevNames.filter(n => !nextNames.some(x => x.toLowerCase() === n.toLowerCase()));
-                action = 'réconciliation (−' + removed.length + ' obsolète(s) : ' + removed.join(', ') + ')';
-            } else if (!authoritative && prevNames.length && nextNames.length < prevNames.length) {
-final = { ...prev, ...next };
-                action = 'fusion (+' + (prevNames.length - nextNames.length) + ' modèle(s) conservé(s))';
-            }
-            const withAlias = {};
-            for (const [k, v] of Object.entries(final)) {
-                if (!Number.isFinite(v)) continue;
-                if (k !== k.toLowerCase()) withAlias[k] = Math.max(0, Math.min(100, Math.round(v)));
-            }
-            for (const [k, v] of Object.entries(withAlias)) {
+
+            const next = { v: 1, ts: now, source: String(source || '?'), complete, confidence: numberOrNull(o.confidence) || (complete ? 0.85 : 0.4), models: {} };
+            for (const [k, v] of Object.entries(prev.models)) {
                 const low = k.toLowerCase();
-                if (!(low in withAlias)) withAlias[low] = v;
+                const hit = incomingNames.find(n => n.toLowerCase() === low);
+                if (hit) { next.models[hit] = { pct: incoming[hit], lastSeen: now, hits: Object.assign({}, v.hits, { [source]: now }) }; }
+                else { next.models[k] = { pct: v.pct, lastSeen: v.lastSeen, hits: v.hits }; }
             }
-            const now = Date.now();
-            const seen = readJSON(STORAGE_KEY_MODEL_PCT_SEEN, {});
-            for (const n of nextNames) seen[n] = now;
-            for (const n of displayableModelNames(withAlias)) if (!seen[n]) seen[n] = now;
-            if (authoritative) {
-                for (const n of Object.keys(seen)) {
-                    if (!(n in withAlias)) delete seen[n];
+            for (const n of incomingNames) {
+                if (next.models[n]) continue;
+                next.models[n] = { pct: incoming[n], lastSeen: now, hits: { [source]: now } };
+            }
+
+            const misses = readModelMisses();
+            const removed = [];
+            if (complete) {
+                for (const k of Object.keys(next.models)) {
+                    if (incomingNames.some(n => n.toLowerCase() === k.toLowerCase())) { delete misses[k]; continue; }
+                    misses[k] = (misses[k] || 0) + 1;
+                    if (misses[k] >= CFG.modelRemoveAfterMisses) { delete next.models[k]; delete misses[k]; removed.push(k); }
                 }
             }
-            for (const n of Object.keys(seen)) {
-                if (now - (seen[n] || 0) > 7 * 24 * 60 * 60 * 1000) {
-                    delete seen[n];
-                    delete withAlias[n];
-                    delete withAlias[n.toLowerCase()];
-                }
+
+            for (const k of Object.keys(next.models)) {
+                if (now - (next.models[k].lastSeen || 0) > HISTORY_RETENTION_MS) { delete next.models[k]; delete misses[k]; removed.push(k); }
             }
-            localStorage.setItem(STORAGE_KEY_MODEL_PCT, JSON.stringify(withAlias));
-            localStorage.setItem(STORAGE_KEY_MODEL_PCT_SEEN, JSON.stringify(seen));
-            localStorage.setItem(STORAGE_KEY_MODEL_PCT_TS, String(now));
-            const finalNames = displayableModelNames(withAlias);
-            journalHarvest({ ts: now, source, action, avant: prevNames, apres: finalNames.map(n => n + '=' + withAlias[n]) });
+
+            localStorage.setItem(STORAGE_KEY_MODEL_QUOTA, JSON.stringify(next));
+            localStorage.setItem(STORAGE_KEY_MODEL_MISSES, JSON.stringify(misses));
+
+            const finalNames = Object.keys(next.models).filter(isDisplayableModelKey);
+            const action = removed.length ? ('retrait de ' + removed.length + ' : ' + removed.join(', '))
+                : (complete ? 'scan complet' : 'fusion (scan partiel)');
+            journalHarvest({ ts: now, source, action, avant: prevNames, apres: finalNames.map(n => n + '=' + next.models[n].pct) });
             console.log('[MammouthWidget] modèles (' + source + ', ' + action + ') →',
-                finalNames.map(n => n + ' ' + withAlias[n] + '%').join(', '));
+                finalNames.map(n => n + ' ' + next.models[n].pct + '%').join(', '));
             return true;
         } catch (e) { console.warn('[MammouthWidget] storeModelPct err', e); return false; }
     }
-    const GENERIC_TITLE_RE = /utilisation|quota|^total\b|usage|semaine|week|mois|month|cette\b|pool|globale|générale|generale|laboratoire|labo|consommation|conso\b|crédit|credit|fenêtre|glissante|session|réinit|reinit/i;
+    function readModelMisses() {
+        const m = readJSON(STORAGE_KEY_MODEL_MISSES, {});
+        return (m && typeof m === 'object' && !Array.isArray(m)) ? m : {};
+    }
 
-    /* ================= GARDE ANTI-LECTURE POOL CONTAMINÉE ================= */
+    // Garde anti-lecture contaminée
     function notePoolActivity(extraMs) {
         try {
             const now = Date.now();
@@ -648,7 +910,7 @@ final = { ...prev, ...next };
     function poolGuardActive() {
         try {
             const ts = parseInt(localStorage.getItem(STORAGE_KEY_POOL_GUARD) || '0', 10);
-            if (ts && Date.now() - ts < 20000) return true;
+            if (ts && Date.now() - ts < CFG.poolGuardMs) return true;
             const until = parseInt(localStorage.getItem(STORAGE_KEY_POOL_GUARD_UNTIL) || '0', 10);
             return !!(until && Date.now() < until);
         } catch { return false; }
@@ -666,26 +928,55 @@ final = { ...prev, ...next };
     }
     function poolReadingImplausible(pct) {
         const exp = expectedPoolPct();
-if (exp === null || exp < 1) return false;
+        if (exp === null || exp < 1) return false;
         const tol = Math.max(2.5, exp * 0.6);
         return Math.abs(pct - exp) > tol;
     }
+    let _lastImplausibleLog = 0;
     function logImplausiblePool(pct) {
+        const nowTick = Date.now();
+        if (nowTick - _lastImplausibleLog < 15000) return;
+        _lastImplausibleLog = nowTick;
         const exp = expectedPoolPct();
         console.log('[MammouthWidget] lecture pool INCOHÉRENTE avec l\u2019usage (' + pct + '% vs ' + (exp !== null ? exp.toFixed(1) : '—') + '% attendus) — ignorée (pool filtrée / jauge labo ?)');
     }
 
-    /* ================= HELPERS STORAGE ================= */
+    // Helpers storage
     function numberOrNull(v) {
         if (typeof v === 'number' && !isNaN(v)) return v;
         if (typeof v === 'string') { const n = parseFloat(v); if (!isNaN(n)) return n; }
         return null;
     }
+
     function toPercent(v) {
-        if (typeof v === 'number' && !isNaN(v)) return Math.round(v);
+        if (typeof v === 'number' && isFinite(v)) {
+            if (v > 0 && v <= 1) return Math.round(v * 100);
+            return Math.round(v);
+        }
         if (typeof v === 'string') {
-            const m = v.trim().match(/^(\d+(?:\.\d+)?)\s*%?$/);
-            if (m) return Math.round(parseFloat(m[1]));
+            const m = v.trim().match(/^(\d+(?:[.,]\d+)?)\s*%?$/);
+            if (!m) return null;
+            const n = parseFloat(m[1].replace(',', '.'));
+            if (!isFinite(n)) return null;
+            if (n > 0 && n <= 1) return Math.round(n * 100);
+            return Math.round(n);
+        }
+        return null;
+    }
+
+    function fmtPct(pct, suffix) {
+        if (pct == null || !isFinite(pct)) return '—';
+        const r = Math.round(pct);
+        return r + (suffix == null ? ' %' : suffix);
+    }
+
+    function toPercentStrict(v) {
+        if (typeof v === 'number' && isFinite(v)) return Math.round(v);
+        if (typeof v === 'string') {
+            const m = v.trim().match(/^(\d+(?:[.,]\d+)?)\s*%?$/);
+            if (!m) return null;
+            const n = parseFloat(m[1].replace(',', '.'));
+            return isFinite(n) ? Math.round(n) : null;
         }
         return null;
     }
@@ -693,6 +984,64 @@ if (exp === null || exp < 1) return false;
         try { const p = JSON.parse(localStorage.getItem(key)); return p == null ? fallback : p; }
         catch { return fallback; }
     }
+    function setJSON(key, v) { try { localStorage.setItem(key, JSON.stringify(v)); } catch {} }
+
+    function logSourceRejection(source, reason, raw) {
+        setJSON(STORAGE_KEY_SOURCE_LOG, { ts: Date.now(), source, reason, sample: raw == null ? null : JSON.stringify(raw).slice(0, 300) });
+        console.warn('[MammouthWidget] source ' + source + ' REJETÉE : ' + reason);
+    }
+
+    // Pool
+    const POOL = {
+        _warning: null,
+        _warningUntil: 0,
+        flagTotalWarning(msg) {
+            this._warning = msg;
+            this._warningUntil = Date.now() + 30 * 60 * 1000;
+            console.log('[MammouthWidget] ⚠ ' + msg);
+        },
+        warning() { return (this._warning && Date.now() < this._warningUntil) ? this._warning : null; },
+        clearWarning() { this._warning = null; this._warningUntil = 0; },
+        get usedCents() { return numberOrNull(localStorage.getItem(STORAGE_KEY_RAW_USED)); },
+        get totalCents() { return numberOrNull(localStorage.getItem(STORAGE_KEY_QUOTA_TOTAL)); },
+        get ts() { return numberOrNull(localStorage.getItem(STORAGE_KEY_API_TS)); },
+
+        commit({ usedCents, totalCents, source } = {}) {
+            const u = numberOrNull(usedCents);
+            const t = numberOrNull(totalCents);
+            if (u !== null && u >= 0) {
+                localStorage.setItem(STORAGE_KEY_RAW_USED, String(u));
+                localStorage.setItem(STORAGE_KEY_RAW_USED_CACHE, String(u));
+                localStorage.setItem(STORAGE_KEY_RAW_USED_CACHE_TS, String(Date.now()));
+            }
+            if (t !== null && t > 0) localStorage.setItem(STORAGE_KEY_QUOTA_TOTAL, String(t));
+            const ut = POOL.usedCents, tt = POOL.totalCents;
+            if (ut === null || ut < 0 || tt === null || !(tt > 0)) return null;
+            const raw = (ut / tt) * 100;
+            const pct = Math.max(0, Math.round(raw));
+            localStorage.setItem(STORAGE_KEY_QUOTA, String(pct));
+            POOL.setBlockedFrom(ut, tt);
+            if (source) localStorage.setItem(STORAGE_KEY_POOL_SOURCE, String(source));
+            return pct;
+        },
+
+        blocked: false,
+        _syncing: false,
+        setSyncing(v) { this._syncing = !!v; updateSyncIndicator(); },
+        isSyncing() { return this._syncing; },
+
+        lastPoolSyncTs() { return parseInt(localStorage.getItem(STORAGE_KEY_SPEND_TS) || '0', 10); },
+        setBlockedFrom(usedCents, totalCents) {
+            const u = numberOrNull(usedCents), t = numberOrNull(totalCents);
+            this.blocked = !!(u != null && t != null && t > 0 && (u / t) * 100 > 100);
+            return this.blocked;
+        },
+        computePct(usedCents, totalCents) {
+            const u = numberOrNull(usedCents), t = numberOrNull(totalCents);
+            if (u === null || u < 0 || t === null || !(t > 0)) return null;
+            return Math.max(0, Math.min(100, Math.round((u / t) * 100)));
+        },
+    };
 
     function getThresholdCents() {
         const v = parseFloat(localStorage.getItem(STORAGE_KEY_THRESHOLD_CENTS));
@@ -706,6 +1055,9 @@ if (exp === null || exp < 1) return false;
     function setSessionStart(ts) { localStorage.setItem(STORAGE_KEY_START, String(ts)); }
 
     function apiEnabled() { return localStorage.getItem(STORAGE_KEY_API_ENABLED) !== 'off'; }
+
+    function modelAutoEnabled() { return localStorage.getItem(STORAGE_KEY_MODEL_AUTO) !== 'off'; }
+    function setModelAuto(on) { localStorage.setItem(STORAGE_KEY_MODEL_AUTO, on ? 'on' : 'off'); syncModelAutoButton(); }
     function setApiEnabled(on) { localStorage.setItem(STORAGE_KEY_API_ENABLED, on ? 'on' : 'off'); }
 
     function getMiniMode() {
@@ -741,34 +1093,105 @@ if (exp === null || exp < 1) return false;
         return next;
     }
 
+    // Ledger
+    const SPEND_FRESH_MS = 10 * 60 * 1000;
+    const RAW_USED_FRESH_MS = 6 * 60 * 1000;
+
     function getRequests() {
-        try {
-            let arr = JSON.parse(localStorage.getItem(STORAGE_KEY_REQUESTS) || '[]');
-            const now = Date.now();
-            arr = arr.filter(r => r && Number.isFinite(r.ts) && r.ts + WINDOW_MS > now);
-            if (arr.length === 0) localStorage.removeItem(STORAGE_KEY_REQUESTS);
-            else localStorage.setItem(STORAGE_KEY_REQUESTS, JSON.stringify(arr));
-            return arr.sort((a, b) => a.ts - b.ts);
-        } catch { return []; }
-    }
-    function addRequest(ts, cents) {
-        if (!Number.isFinite(cents) || cents <= 0) cents = 0.01;
-        try {
-            let arr = JSON.parse(localStorage.getItem(STORAGE_KEY_REQUESTS) || '[]');
-            arr.push({ ts, cents });
-            if (arr.length > 500) arr = arr.slice(-500);
-            localStorage.setItem(STORAGE_KEY_REQUESTS, JSON.stringify(arr));
-        } catch { localStorage.setItem(STORAGE_KEY_REQUESTS, JSON.stringify([{ ts, cents }])); }
-    }
-    function updateRequestCost(ts, newCents) {
-        try {
-            const arr = JSON.parse(localStorage.getItem(STORAGE_KEY_REQUESTS) || '[]');
-            const e = arr.find(r => r.ts === ts);
-            if (e) { e.cents = newCents; localStorage.setItem(STORAGE_KEY_REQUESTS, JSON.stringify(arr)); }
-        } catch {}
+        const now = Date.now();
+        const arr = readRequestsRaw();
+        return arr.sort((a, b) => a.ts - b.ts);
     }
 
-    /* ================= DOM REFS ================= */
+    function getRealRequests() { return getRequests().filter(r => !r.sandbox); }
+    function addRequest(ts, cents, meta) {
+        let c = numberOrNull(cents);
+        if (c === null || c <= 0) c = 0.01;
+        try {
+            const arr = readRequestsRaw();
+            arr.push(Object.assign({ ts, cents: c, measured: c > 0.01 }, meta || {}));
+            if (arr.length > CFG.ledgerMaxEntries) arr = arr.slice(-CFG.ledgerMaxEntries);
+            writeRequestsRaw(arr);
+        } catch { writeRequestsRaw([Object.assign({ ts, cents: c }, meta || {})]); }
+    }
+    function updateRequestCost(ts, newCents) {
+        const arr = readRequestsRaw();
+        let hit = false;
+        for (const e of arr) {
+            if (e.ts === ts) { e.cents = newCents; e.measured = newCents > 0.01; hit = true; break; }
+        }
+        if (hit) writeRequestsRaw(arr);
+    }
+    function removeRequests(pred) {
+        const arr = readRequestsRaw();
+        const kept = arr.filter(r => !pred(r));
+        if (kept.length !== arr.length) writeRequestsRaw(kept);
+        return arr.length - kept.length;
+    }
+    function readRequestsRaw() {
+        try {
+            const arr = JSON.parse(localStorage.getItem(STORAGE_KEY_REQUESTS) || '[]');
+            const now = Date.now();
+            return (Array.isArray(arr) ? arr : [])
+                .filter(r => r && Number.isFinite(r.ts) && r.ts + WINDOW_MS > now);
+        } catch { return []; }
+    }
+    function writeRequestsRaw(arr) {
+        try { localStorage.setItem(STORAGE_KEY_REQUESTS, JSON.stringify(arr)); } catch {}
+    }
+
+    function pruneRequests() {
+        const now = Date.now();
+        const raw = (() => { try { const a = JSON.parse(localStorage.getItem(STORAGE_KEY_REQUESTS) || '[]'); return Array.isArray(a) ? a : []; } catch { return []; } })();
+        const kept = raw.filter(r => r && Number.isFinite(r.ts) && r.ts + WINDOW_MS > now)
+            .slice(-CFG.ledgerMaxEntries);
+        if (kept.length !== raw.length) {
+            if (kept.length) localStorage.setItem(STORAGE_KEY_REQUESTS, JSON.stringify(kept));
+            else localStorage.removeItem(STORAGE_KEY_REQUESTS);
+        }
+        return kept;
+    }
+    let _lastPruneTs = 0;
+    function maybePruneRequests() {
+        const now = Date.now();
+        if (now - _lastPruneTs < CFG.ledgerPruneMs) return;
+        _lastPruneTs = now;
+        pruneRequests();
+    }
+
+    function authoritativeWindowSpend() {
+        const spendTs = parseInt(localStorage.getItem(STORAGE_KEY_SPEND_TS) || '0', 10);
+        const spend = numberOrNull(localStorage.getItem(STORAGE_KEY_SPEND_CENTS));
+        if (spendTs && Date.now() - spendTs <= SPEND_FRESH_MS && spend !== null && spend > 0) return spend;
+        const rawTs = parseInt(localStorage.getItem(STORAGE_KEY_RAW_USED_CACHE_TS) || '0', 10);
+        const raw = numberOrNull(localStorage.getItem(STORAGE_KEY_RAW_USED)) ?? numberOrNull(localStorage.getItem(STORAGE_KEY_RAW_USED_CACHE));
+        if (rawTs && Date.now() - rawTs <= RAW_USED_FRESH_MS && raw !== null && raw > 0) return raw;
+        return null;
+    }
+
+    function computeCoverage() {
+        const tracked = getRealRequests().reduce((s, r) => s + (numberOrNull(r.cents) || 0), 0);
+        const pool = authoritativeWindowSpend();
+        const clearedTs = numberOrNull(localStorage.getItem(STORAGE_KEY_LEDGER_CLEARED)) || 0;
+        if (pool === null) return { trackedCents: tracked, poolCents: null, gapCents: null, gapPct: null, cleared: false };
+        const gap = Math.max(0, Math.round((pool - tracked) * 100) / 100);
+        return {
+            trackedCents: tracked, poolCents: pool, gapCents: gap,
+            gapPct: pool > 0 ? Math.round((gap / pool) * 100) : 0,
+            cleared: !!clearedTs && Date.now() - clearedTs < 60 * 60 * 1000,
+        };
+    }
+
+    function coverageLabel() {
+        const c = computeCoverage();
+        if (c.poolCents === null) return '';
+        if (c.cleared) return '⨯ registre effacé';
+        if (c.gapPct >= 8) return '⚠ ' + c.gapPct + ' % non suivis (autre onglet)';
+        if (c.gapPct > 2) return '≈ ' + c.gapPct + ' % non suivis';
+        return '✓ suivi complet';
+    }
+
+    // Références DOM
     const countdownEl = document.getElementById('mw-countdown');
     const statusEl = document.getElementById('mw-status-text');
     const progressTimerEl = document.getElementById('mw-progress-timer');
@@ -786,7 +1209,7 @@ if (exp === null || exp < 1) return false;
     const settingsPanel = document.getElementById('mw-settings');
 
     let lastBadgeState = null;
-    /* ================= BADGE API ================= */
+    // Badge API
     function setApiBadge(state, label) {
         if (state === lastBadgeState && state !== 'loading') return;
         lastBadgeState = state;
@@ -816,10 +1239,24 @@ if (exp === null || exp < 1) return false;
     let targetPercent = null;
     let displayedPercent = null;
 
-    /* ================= AFFICHAGE ================= */
-    function setPercentDisplay(raw) {
-        const t = toPercent(raw);
-        if (t === null) return;
+    // Affichage
+
+    function setPercentDisplay(v) {
+        const fromPool = (v && typeof v === 'object') ? v.p1 : toPercentStrict(v);
+        let t = (fromPool === null || fromPool === undefined) ? toPercentStrict(localStorage.getItem(STORAGE_KEY_QUOTA)) : fromPool;
+
+        if (POOL.totalCents == null) t = null;
+        if (t === null) {
+            if (displayedPercent !== null) {
+                displayedPercent = null;
+                realPercentEl.innerText = '— %';
+                realPercentEl.style.color = '#888';
+                progressQuotaEl.style.width = '0%';
+                widget.classList.remove('mw-critical');
+            }
+            return;
+        }
+        t = Math.max(0, Math.min(100, Math.round(t)));
         targetPercent = t;
         if (displayedPercent === t) return;
         displayedPercent = t;
@@ -885,17 +1322,18 @@ if (exp === null || exp < 1) return false;
         return `${minutes}m`;
     }
 
-    function updateMini(oldestRemaining, elapsedPct) {
-        const q = targetPercent;
+    function updateMini(oldestRemaining, elapsedPct, V) {
+        const v = V || buildRings();
+        const q = v.p1 != null ? v.p1 : targetPercent;
         const textMode = getMiniMode();
         const circleMode = getCircleMode();
         const hasActiveWindow = oldestRemaining != null && oldestRemaining > 0;
         const windowEnded = oldestRemaining != null && oldestRemaining <= 0;
 
         if (textMode === 'used') {
-            miniTimeEl.innerText = q != null ? q + '%' : '—';
+            miniTimeEl.innerText = fmtPct(q, '%');
         } else if (textMode === 'remaining') {
-            miniTimeEl.innerText = q != null ? Math.max(0, 100 - q) + '%' : '—';
+            miniTimeEl.innerText = fmtPct(q != null ? Math.max(0, 100 - q) : null, '%');
         } else {
             if (hasActiveWindow) {
                 const total = Math.floor(oldestRemaining / 1000);
@@ -908,7 +1346,7 @@ if (exp === null || exp < 1) return false;
             } else if (windowEnded) {
                 miniTimeEl.innerText = '✓';
             } else {
-                miniTimeEl.innerText = q != null ? q + '%' : '—';
+                miniTimeEl.innerText = fmtPct(q, '%');
             }
         }
 
@@ -938,7 +1376,7 @@ if (exp === null || exp < 1) return false;
         }
     }
 
-const SB_CIRC = 2 * Math.PI * 20;
+    const SB_CIRC = 2 * Math.PI * 20;
     function setSbRing(id, frac) {
         const el = document.getElementById(id);
         if (!el) return;
@@ -946,7 +1384,7 @@ const SB_CIRC = 2 * Math.PI * 20;
         const circ = parseFloat(el.getAttribute('stroke-dasharray')) || SB_CIRC;
         el.setAttribute('stroke-dashoffset', String(circ * (1 - f)));
     }
-    /* ================= UPDATE UI ================= */
+    // Mise à jour de l'UI
     function applyUiMode() {
         const mode = getUiMode();
         document.body.classList.toggle('mw-mode-sidebar', mode === 'sidebar');
@@ -965,16 +1403,8 @@ const SB_CIRC = 2 * Math.PI * 20;
         const h = Math.floor(m / 60); const mm = m % 60;
         return `Réinit. dans ${h}h ${mm}m`;
     }
-    function nextMondayResetLabel() {
-        const now = new Date();
-        const day = now.getDay();
-        let add = (8 - day) % 7; if (add === 0 && now.getHours() >= 16) add = 7;
-        if (add === 0) add = 7;
-        const d = new Date(now); d.setDate(now.getDate() + add); d.setHours(16, 17, 0, 0);
-        return 'Réinit. ' + d.toLocaleDateString('fr-FR', { weekday: 'short', hour: '2-digit', minute: '2-digit', hour12: false }).replace(':', 'h');
-    }
 
-    /* ================= SIMULATEUR DE RÉCUPÉRATION ================= */
+    // Simulateur de récupération
     function fmtCentsFr(c) { return (Math.round(c * 100) / 100).toFixed(2).replace('.', ',') + '¢'; }
     function fmtPctFr(v) {
         if (v == null || !Number.isFinite(v)) return '—';
@@ -995,18 +1425,23 @@ const SB_CIRC = 2 * Math.PI * 20;
         const horizon = now + Math.max(0, deltaMs || 0);
         const events = [];
         for (const r of (reqs || [])) {
-            const c = numberOrNull(r && r.cents);
-            if (!r || !Number.isFinite(r.ts) || c === null || c <= 0) continue;
+            if (!r || r.sandbox) continue;
+            const c = numberOrNull(r.cents);
+            if (!Number.isFinite(r.ts) || c === null || c <= 0) continue;
             events.push({ rel: r.ts + WINDOW_MS, cents: c });
         }
         events.sort((a, b) => a.rel - b.rel);
         let recovered = 0, count = 0;
         for (const e of events) if (e.rel <= horizon) { recovered += e.cents; count++; }
-        const next = events.find(e => e.rel > now) || null;
-        const total = numberOrNull(localStorage.getItem(STORAGE_KEY_QUOTA_TOTAL));
-        const spend = numberOrNull(localStorage.getItem(STORAGE_KEY_SPEND_CENTS));
-        let curPct = targetPercent;
-        if (curPct == null && spend != null && total != null && total > 0) curPct = (spend / total) * 100;
+
+        let next = null;
+        for (const e of events) {
+            if (e.rel <= now) continue;
+            if (next && e.rel - next.rel > 500) break;
+            next = next ? { rel: next.rel, cents: next.cents + e.cents } : { rel: e.rel, cents: e.cents };
+        }
+        const total = POOL.totalCents;
+        const curPct = POOL.computePct(POOL.usedCents, total);
         let futurePct = null;
         if (curPct != null && total != null && total > 0) futurePct = Math.max(0, curPct - (recovered / total) * 100);
         const maxRemaining = events.length ? Math.max(0, events[events.length - 1].rel - now) : 0;
@@ -1040,7 +1475,7 @@ const SB_CIRC = 2 * Math.PI * 20;
 
         let min = parseInt(slider.value, 10) || 0;
         if (!dragging) {
-            if (min > maxMin && maxMin > 0) { min = maxMin; slider.value = String(min); } // horizon rétréci (libérations passées)
+            if (min > maxMin && maxMin > 0) { min = maxMin; slider.value = String(min); }
             if (maxMin <= 0) min = 0;
         }
         if (offsetEl) offsetEl.textContent = disabled ? '—' : fmtDurMin(min);
@@ -1085,74 +1520,42 @@ const SB_CIRC = 2 * Math.PI * 20;
         if (result.innerHTML !== txt) result.innerHTML = txt;
     }
 
-    function updatePopoverSimHint(reqs) {
-        const el = document.getElementById('mw-pop-sim-hint');
-        if (!el) return;
-        const list = Array.isArray(reqs) ? reqs : getRequests();
-        const p = simProjection(list, 0);
-        let txt;
-        if (p.totalReqs === 0) txt = 'Aucune libération prévue';
-        else {
-            const parts = [];
-            if (p.next) parts.push(`prochaine : +${fmtCentsFr(p.next.cents)} dans ${fmtHrMin(p.next.rel - Date.now())}`);
-            parts.push(`total +${fmtCentsFr(p.totalRecoverable)} d'ici ${fmtHrMin(p.maxRemaining)}`);
-            txt = '↺ ' + parts.join(' · ');
-        }
-        if (el.innerText !== txt) el.innerText = txt;
-    }
-    function getDailyModel() { return localStorage.getItem(STORAGE_KEY_DAILY_MODEL) || ''; }
-    function setDailyModel(v) { if (v) localStorage.setItem(STORAGE_KEY_DAILY_MODEL, v); else localStorage.removeItem(STORAGE_KEY_DAILY_MODEL); }
-    function getDailyByModelMap() {
-        const m = readJSON(STORAGE_KEY_DAILY_BYMODEL, {});
-        for (const k of Object.keys(m)) if (isJunkModelKey(k)) delete m[k];
-        const p = readJSON(STORAGE_KEY_MODEL_PCT, {});
-        for (const [k,v] of Object.entries(p)) if (Number.isFinite(v) && !isJunkModelKey(k)) m[k] = v;
-        return m;
+    function scoreModelName(query, candidate) {
+        if (!query || !candidate) return 0;
+
+        const canon = (x) => String(x).toLowerCase().trim().replace(/[-_/.]+/g, ' ').replace(/\s+/g, ' ');
+        const q = canon(query), c = canon(candidate);
+        if (!q || !c) return 0;
+        if (q === c) return 100;
+        const qTok = new Set(q.split(' ').filter(Boolean));
+        const cTok = new Set(c.split(' ').filter(Boolean));
+        let inter = 0; for (const t of qTok) if (cTok.has(t)) inter++;
+        if (!inter) return 0;
+        let sc = 30;
+        sc += Math.round((inter / qTok.size) * 30);
+        sc += Math.round((inter / cTok.size) * 15);
+        if (c.startsWith(q)) sc += 15;
+        if (brandFamilyOf(c) && brandFamilyOf(c) === brandFamilyOf(q)) sc += 10;
+        sc -= Math.abs(c.length - q.length) * 0.3;
+        return Math.max(0, Math.round(sc));
     }
     function resolveDailyPct(dailyModel, map) {
         if (!dailyModel) return null;
-        if (map[dailyModel] != null && Number.isFinite(map[dailyModel])) return map[dailyModel];
-        const low = dailyModel.toLowerCase();
-        for (const [k, v] of Object.entries(map)) {
-            if (k.toLowerCase() === low && Number.isFinite(v)) return v;
+        const src = map || modelPctMap();
+        if (src[dailyModel] != null && Number.isFinite(src[dailyModel])) return src[dailyModel];
+        let best = null, bestScore = 0;
+        for (const [k, v] of Object.entries(src)) {
+            if (!Number.isFinite(v)) continue;
+            const sc = scoreModelName(dailyModel, k);
+            if (sc > bestScore) { bestScore = sc; best = v; }
         }
-        for (const [k, v] of Object.entries(map)) {
-            const kl = k.toLowerCase();
-            if (low.includes(kl) || kl.includes(low)) return v;
-        }
-        return null;
+        return bestScore >= 60 ? best : null;
     }
-    let _lastDailyKey = '';
-    function populateDailyModelSelect() {
-        const sel = document.getElementById('mw-pop-model-select');
-        if (!sel) return;
-        let current = getDailyModel();
-        const modelsRaw = localStorage.getItem(STORAGE_KEY_MODELS) || '';
-        const list = modelsRaw ? modelsRaw.split(/\s*(?:·|,)\s*/).map(s => s.replace(/\s*\+\d+$/, '').trim()).filter(Boolean) : [];
-        const genericBrands = new Set(['Claude','Grok','GPT','Gemini','Llama','DeepSeek','Mistral','Kimi']);
-        const filtered = list.filter(m => !genericBrands.has(m));
-        const all = filtered.length ? filtered : list;
-        if (genericBrands.has(current)) {
-            const mapped = all.find(m => resolveDailyPct(m, getDailyByModelMap()) != null && m.toLowerCase().includes(current.toLowerCase()))
-                || all.find(m => m.toLowerCase().includes(current.toLowerCase()));
-            if (mapped) { current = mapped; setDailyModel(current); }
-            else { current = ''; setDailyModel(''); }
-        }
-        const key = all.join('|') + '|' + current;
-        if (key === _lastDailyKey && sel.options.length === all.length + 1) {
-            if (sel.value !== current) sel.value = current;
-            return;
-        }
-        _lastDailyKey = key;
-        const prev = sel.value;
-        sel.innerHTML = '<option value="">— Aperçu autre modèle —</option>' + all.map(m => `<option value="${m.replace(/"/g,'&quot;')}">${m}</option>`).join('');
-        sel.value = all.includes(prev) ? prev : (all.includes(current) ? current : '');
-        if (!sel.value && current === '') sel.value = '';
-    }
-    /* ================= logos laboratoire + animations ================= */
+    // Logos et animations
 
-let _mwRenderedSig = null;
-let _mwPrevPct = {};
+    const MW_MODEL_CONTAINERS = ['mw-pop-models', 'mw-widget-models'];
+    let _mwRenderSigs = {};
+    let _mwPrevPcts = {};
 
     function getLogoMode() { return localStorage.getItem(STORAGE_KEY_LOGO_MODE) === '1'; }
     function setLogoMode(on) { localStorage.setItem(STORAGE_KEY_LOGO_MODE, on ? '1' : '0'); syncLogoToggle(); }
@@ -1182,11 +1585,11 @@ let _mwPrevPct = {};
             if (logoEl.style.display !== 'none') { logoEl.style.display = 'none'; _sb3LogoFam = null; }
             if (pctEl.style.display !== '') pctEl.style.display = '';
             if (iconEl && iconEl.style.display !== '') iconEl.style.display = '';
-            if (itemEl && itemEl.title !== 'Quota journalier') itemEl.title = 'Quota journalier';
+            if (itemEl && itemEl.title !== 'Modèle le plus strained') itemEl.title = 'Modèle le plus strained';
             return;
         }
         const fam = brandFamilyOf(modelName) || '';
-if (_sb3LogoFam !== fam) {
+        if (_sb3LogoFam !== fam) {
             logoEl.innerHTML = brandLogoSvg(fam, 32);
             _sb3LogoFam = fam;
             bumpEl(logoEl);
@@ -1194,7 +1597,7 @@ if (_sb3LogoFam !== fam) {
         if (logoEl.style.display !== 'flex') logoEl.style.display = 'flex';
         if (pctEl.style.display !== 'none') pctEl.style.display = 'none';
         if (iconEl && iconEl.style.display !== 'none') iconEl.style.display = 'none';
-        const t = 'Quota journalier · ' + modelName + ' — ' + (pct != null ? pct + '%' : '—');
+        const t = 'Modèle le plus strained · ' + modelName + ' — ' + fmtPct(pct);
         if (itemEl && itemEl.title !== t) itemEl.title = t;
     }
     function brandLogoSvg(fam, size = 18) {
@@ -1222,7 +1625,7 @@ if (_sb3LogoFam !== fam) {
                 return wrap(`<circle cx="12" cy="12" r="12" fill="#F5F5F3"/><g transform="translate(3.84 3.84) scale(0.68)" fill="#111"><path d="M21.765.351C22.998.351 24 1.353 24 2.586S22.998 4.82 21.765 4.82h-1.974c-.15 0-.26-.12-.26-.26V2.586A2.237 2.237 0 0 1 21.765.35M9.41 13.388l8.447-8.377c.16-.16.07-.471-.14-.471h-4.55s-.1.02-.14.06l-9.099 9.029c-.14.14-.35.02-.35-.21V4.81c0-.15-.1-.27-.221-.27H.22c-.12 0-.22.12-.22.27v18.57c0 .15.1.27.22.27h3.137c.12 0 .22-.12.22-.27v-3.79c0-.08.03-.16.08-.21l2.826-2.796c.07-.07.16-.08.241-.03l7.546 5.551a8.9 8.9 0 0 0 4.018 1.493c.12.01.23-.11.23-.27V19.76c0-.14-.08-.25-.19-.26a5.8 5.8 0 0 1-2.355-.942l-6.533-4.73c-.14-.09-.15-.32-.03-.441"/></g>`);
             case 'GLM':
                 return letter('#2A6BFF', 'G');
-            default: // inconnu — badge dégradé + ✦ (pas de faux logo de marque)
+            default:
                 return wrap(`<defs><linearGradient id="mwd-grad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffa502"/><stop offset="1" stop-color="#ff8e53"/></linearGradient></defs><circle cx="12" cy="12" r="12" fill="url(#mwd-grad)"/><text x="12" y="16.6" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" font-size="12" font-weight="800" fill="#fff">✦</text>`);
         }
     }
@@ -1230,184 +1633,270 @@ if (_sb3LogoFam !== fam) {
     const GROK_2 = 'M325.226 695.251C206.128 580.84 226.662 403.776 328.285 301.668C403.431 226.097 526.549 195.254 634.026 240.596L749.454 186.994C728.657 171.88 702.007 155.623 671.424 144.2C533.19 86.9942 367.693 115.465 255.323 228.382C147.234 337.081 113.244 504.215 171.613 646.833C215.216 753.423 143.739 828.818 71.7385 904.916C46.2237 931.893 20.6216 958.87 0 987.429L325.139 695.339';
 
     function renderModelBlocks() {
-        const c = document.getElementById('mw-pop-models');
+        for (const cid of MW_MODEL_CONTAINERS) renderModelBlocksInto(cid);
+    }
+    const MODEL_COLORS = { Grok:['#ff6b6b','#ff8e53'], Claude:['#a29bfe','#6c5ce7'], GPT:['#2ed573','#7bed9f'], Gemini:['#ffa502','#ffc048'] };
+    const MODEL_DEFAULT_COL = ['#ffa502','#ffc048'];
+    function renderModelBlocksInto(containerId) {
+        const c = document.getElementById(containerId);
         if (!c) return;
-        const harvested = readJSON(STORAGE_KEY_MODEL_PCT, {});
-        const usedModels = [...new Set(Object.keys(harvested).filter(k => k !== k.toLowerCase() && /^[A-Z]/.test(k) && !isJunkModelKey(k) && Number.isFinite(harvested[k])))];
-        usedModels.sort((a, b) => harvested[b] - harvested[a]);
+
+        const entries = modelEntries();
+        const harvested = {};
+        for (const e of entries) harvested[e.name] = e.pct;
+        const ageOf = {};
+        for (const e of entries) ageOf[e.name] = e.lastSeen;
+        const usedModels = entries.map(e => e.name);
         const logoMode = getLogoMode();
+        const stale = modelStale();
         if (!usedModels.length) {
-            if (_mwRenderedSig !== 'empty') {
-                _mwRenderedSig = 'empty';
-                _mwPrevPct = {};
+            if (_mwRenderSigs[containerId] !== 'empty') {
+                _mwRenderSigs[containerId] = 'empty';
+                _mwPrevPcts[containerId] = {};
                 const onSettings = window.location.pathname.includes('/app/account/settings');
                 c.innerHTML = `<div class="mw-pop-used" style="text-align:center;padding:8px 0;line-height:1.5">
-                    ${onSettings ? 'Clique <b>Rafraîchir</b> pour scanner les quotas par modèle.' : 'Va sur <b>Réglages → Quota</b> puis clique <b>Rafraîchir</b> dans ce panneau.<br><span style="font-size:10px;opacity:0.7">Le scan lit la jauge affichée sous chaque modèle (ex : Grok Fast 3%).</span>'}
+                    ${onSettings ? 'Clique <b>Rafraîchir</b> pour scanner les quotas par modèle.' : 'Clique le bouton <b>📥 Récupérer les quotas par modèle</b> ci-dessous : une petite fenêtre s\'ouvre en bas à droite, lit les jauges puis se ferme toute seule — ta page reste intacte. (La popup officielle du quota fonctionne aussi — lecture automatique.)'}
                 </div>`;
             }
             return;
         }
-        const colors = { Grok:['#ff6b6b','#ff8e53'], Claude:['#a29bfe','#6c5ce7'], GPT:['#2ed573','#7bed9f'], Gemini:['#ffa502','#ffc048'] };
-        const defaultCol = ['#ffa502','#ffc048'];
-        const namesSig = usedModels.join('|') + (logoMode ? '#L' : '#P');
-        if (namesSig !== _mwRenderedSig) {
-            _mwRenderedSig = namesSig;
-            _mwPrevPct = {};
+        const namesSig = usedModels.join('|') + (logoMode ? '#L' : '#P') + (stale ? '#S' : '');
+        const prevPct = _mwPrevPcts[containerId] || {};
+        if (namesSig !== _mwRenderSigs[containerId]) {
+            _mwRenderSigs[containerId] = namesSig;
+            _mwPrevPcts[containerId] = {};
             c.innerHTML = usedModels.map((name, i) => {
-                const pct = harvested[name] != null ? harvested[name] : 0;
+                const pct = harvested[name];
+                const over = pct > 100;
                 const fam = brandFamilyOf(name);
-                const col = colors[fam] || defaultCol;
-                const safeName = String(name).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-                const headRight = logoMode
-                    ? `<span class="mw-model-logo" title="${fam || 'Laboratoire'}">${brandLogoSvg(fam)}</span>`
-                    : `<span class="mw-model-pct">${pct}%</span>`;
-                return `<div class="mw-model-block mw-enter" style="animation-delay:${i * 70}ms">
+                const col = MODEL_COLORS[fam] || MODEL_DEFAULT_COL;
+                const safeName = escapeHtml(name);
+
+                const headRight = `<span class="mw-model-right">`
+                    + (logoMode ? `<span class="mw-model-logo" title="${escapeHtml(fam || 'Laboratoire')}">${brandLogoSvg(fam)}</span>` : '')
+                    + `<span class="mw-model-pct${over ? ' warn' : ''}">${fmtPct(pct, '%')}</span></span>`;
+
+                const ageLbl = modelEntryAgeLabel(ageOf[name]);
+                const ageLine = ageLbl === 'à l\'instant' ? ''
+                    : `<div class="mw-model-age" title="Dernière mesure réelle de ce quota">${escapeHtml(ageLbl)}</div>`;
+                return `<div class="mw-model-block mw-enter${over ? ' mw-over' : ''}"${over ? ' title="Quota dépassé — requêtes bloquées temporairement"' : ''} style="animation-delay:${i * 70}ms">
                     <div class="mw-model-head"><span class="mw-model-name">${safeName}</span>${headRight}</div>
-                    <div class="mw-pop-bar" style="margin-top:6px"><div class="mw-pop-fill" style="width:${pct}%;background:linear-gradient(90deg,${col[0]},${col[1]})"></div></div>
-                    <div class="mw-pop-used">${pct}% utilisé · ${safeName}</div>
+                    <div class="mw-pop-bar" style="margin-top:6px"><div class="mw-pop-fill" style="width:${Math.min(100, pct)}%;background:linear-gradient(90deg,${col[0]},${col[1]})"></div></div>
+                    ${ageLine}
                 </div>`;
             }).join('');
-            for (const name of usedModels) _mwPrevPct[name] = harvested[name];
+            for (const name of usedModels) _mwPrevPcts[containerId][name] = harvested[name];
             return;
         }
         const blocks = c.querySelectorAll('.mw-model-block');
         usedModels.forEach((name, i) => {
             const block = blocks[i];
             if (!block) return;
-            const pct = harvested[name] != null ? harvested[name] : 0;
-            if (_mwPrevPct[name] === pct) return;
+            const pct = harvested[name];
+            if (prevPct[name] === pct) return;
+            block.classList.toggle('mw-over', pct > 100);
             const fill = block.querySelector('.mw-pop-fill');
-            if (fill) fill.style.width = pct + '%';
+            if (fill) fill.style.width = Math.min(100, pct) + '%';
             const pctEl = block.querySelector('.mw-model-pct');
-            if (pctEl) { pctEl.textContent = pct + '%'; bumpEl(pctEl); }
-            const usedEl = block.querySelector('.mw-pop-used');
-            if (usedEl) { usedEl.textContent = pct + '% utilisé · ' + name; bumpEl(usedEl); }
-            _mwPrevPct[name] = pct;
+            if (pctEl) {
+                pctEl.textContent = fmtPct(pct, '%');
+                pctEl.classList.toggle('warn', pct > 100);
+                bumpEl(pctEl);
+            }
+            _mwPrevPcts[containerId][name] = pct;
         });
     }
-    function updateSidebar() {
-const q = targetPercent;
-        const reqs = getRequests();
+    function escapeHtml(s) {
+        return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+    // Anneaux
+    function buildRings() {
         const now = Date.now();
-        const pct1 = q;
-        let elapsedPct = 0; let oldestRem = null;
-        if (reqs.length) { const oldest = reqs[0]; oldestRem = Math.max(0, oldest.ts + WINDOW_MS - now); elapsedPct = Math.min(100, ((WINDOW_MS - oldestRem) / WINDOW_MS) * 100); }
-        const pct2 = Math.round(elapsedPct);
-        const dailyModel = getDailyModel();
-        const byModel = getDailyByModelMap();
-        let pct3;
-let model3 = null;
-        const resolved = resolveDailyPct(dailyModel, byModel);
-        if (dailyModel && resolved != null) {
-            pct3 = Math.max(0, Math.min(100, Math.round(resolved)));
-            model3 = dailyModel;
-        } else if (dailyModel && resolved == null) {
-            pct3 = 0;
-            model3 = dailyModel;
-        } else {
-            const vals = Object.values(readJSON(STORAGE_KEY_MODEL_PCT, {})).filter(v=>Number.isFinite(v));
-            pct3 = vals.length ? Math.max(...vals) : (q != null ? q : 0);
-            if (vals.length) {
-                const harvested = readJSON(STORAGE_KEY_MODEL_PCT, {});
-                let top = null, topVal = -1;
-                for (const k of displayableModelNames(harvested)) {
-                    if (harvested[k] > topVal) { topVal = harvested[k]; top = k; }
-                }
-                if (top) model3 = top;
-            }
+        const reqs = getRequests();
+        const real = reqs.filter(r => !r.sandbox);
+
+        const pct1 = POOL.computePct(POOL.usedCents, POOL.totalCents);
+        const poolUsed = POOL.usedCents, poolTotal = POOL.totalCents;
+
+        let oldestRem = null, elapsedPct = null, newestRem = null, elapsedMs = null;
+        if (real.length) {
+            oldestRem = Math.max(0, real[0].ts + WINDOW_MS - now);
+            newestRem = Math.max(0, real[real.length - 1].ts + WINDOW_MS - now);
+
+            elapsedMs = Math.max(0, Math.min(WINDOW_MS, WINDOW_MS - oldestRem));
+            elapsedPct = Math.max(0, Math.min(100, Math.round((elapsedMs / WINDOW_MS) * 100)));
+        }
+        const sumCents = real.reduce((s, r) => s + (numberOrNull(r.cents) || 0), 0);
+        const proj0 = simProjection(real, 0);
+        const nextRel = proj0.next ? proj0.next.rel : null;
+        const unmeasured = real.filter(r => r.measured === false).length;
+        let line2 = 'aucune requête en fenêtre';
+        if (real.length) {
+            const bits = [fmtCentsFr(sumCents)];
+            if (nextRel) bits.push('prochaine lib. dans ' + fmtHrMin(nextRel - now));
+            else bits.push('plus rien à libérer');
+            if (unmeasured) bits.push(unmeasured + ' non mesurée(s)');
+            line2 = bits.join(' · ');
         }
 
-        const p1 = pct1, p2 = pct2, p3 = pct3;
-        const el1 = document.getElementById('mw-sb-pct-1'), el2 = document.getElementById('mw-sb-pct-2'), el3 = document.getElementById('mw-sb-pct-3');
-        setTextBump(el1, p1 != null ? p1 + '%' : '—');
-        if (el2) el2.innerText = p2 ? p2 + '%' : '—';
-setTextBump(el3, p3 ? p3 + '%' : '—');
-renderRing3Logo(model3, p3);
-        setSbRing('mw-sb-ring-1', p1 != null ? p1 / 100 : 0);
-        setSbRing('mw-sb-ring-2', p2 / 100);
-        setSbRing('mw-sb-ring-3', p3 / 100);
-
-        const f1 = document.getElementById('mw-pop-fill-1'), f2 = document.getElementById('mw-pop-fill-2');
-        if (f1) f1.style.width = (p1 != null ? p1 : 0) + '%';
-        if (f2) f2.style.width = p2 + '%';
-        renderModelBlocks();
-        const previewEl = document.getElementById('mw-pop-used-preview');
-        if (previewEl) {
-            if (dailyModel && resolveDailyPct(dailyModel, byModel) != null) {
-                const pv = Math.round(resolveDailyPct(dailyModel, byModel));
-                previewEl.style.display = 'block';
-                previewEl.innerText = pv + '% utilisé · ' + dailyModel + ' (aperçu)';
-            } else if (dailyModel) {
-                previewEl.style.display = 'block';
-                previewEl.innerText = 'En attente — va sur Réglages → Quota puis Rafraîchir · ' + dailyModel;
-            } else previewEl.style.display = 'none';
+        const map = modelPctMap();
+        let pct3 = null, model3 = null;
+        for (const n of Object.keys(map)) {
+            if (!isDisplayableModelKey(n)) continue;
+            const v = map[n];
+            if (pct3 === null || v > pct3) { pct3 = v; model3 = n; }
         }
-        const u1 = document.getElementById('mw-pop-used-1'), u2 = document.getElementById('mw-pop-used-2');
-        setTextBump(u1, p1 != null ? p1 + '% utilisé' : '—');
-        if (u2) u2.innerText = p2 ? p2 + '% utilisé' : 'Aucune requête';
-        const r1 = document.getElementById('mw-pop-reset-1');
-        if (r1) r1.innerText = oldestRem != null && oldestRem > 0 ? formatResetIn(oldestRem) : (reqs.length ? 'Libéré ✓' : '—');
-        const r2 = document.getElementById('mw-pop-reset-2');
-        if (r2) r2.innerText = oldestRem != null && oldestRem > 0 ? formatResetIn(oldestRem) : '—';
-updatePopoverSimHint(reqs);
-        const rm = document.getElementById('mw-pop-reset-models');
-        if (rm) rm.innerText = nextMondayResetLabel();
-        const tEl = document.getElementById('mw-pop-time');
-        if (tEl) tEl.innerText = new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', hour12: false });
-        const d1 = document.getElementById('mw-sb-dot-1'), d2 = document.getElementById('mw-sb-dot-2'), d3 = document.getElementById('mw-sb-dot-3');
-        if (d1) d1.classList.toggle('on', p1 != null && p1 >= 90);
-        if (d2) d2.classList.toggle('on', p2 >= 90);
-        if (d3) d3.classList.toggle('on', p3 >= 90);
+        const modelAge = modelAgeLabel();
+        const stale = modelStale();
+
+        return {
+            reqs, real,
+            p1: pct1, p2: elapsedPct, p3: pct3, model3, modelAge, stale,
+            poolUsed, poolTotal,
+            oldestRem, newestRem, elapsedMs, sumCents, line2, nextRel,
+            coverage: computeCoverage(),
+            modelsAge: modelAge,
+        };
     }
 
-    function updateUI() {
-        setPercentDisplay(localStorage.getItem(STORAGE_KEY_QUOTA));
+    function modelNamesResetLabel() {
+        if (!Object.keys(readModelEnvelope().models).length) return '—';
+        return modelStale() ? '⚠ ' + modelAgeLabel() : modelAgeLabel();
+    }
 
-        const savedModels = localStorage.getItem(STORAGE_KEY_MODELS);
-        if (savedModels && quotaModelsEl.innerText !== savedModels) {
-            quotaModelsEl.innerText = savedModels;
-            quotaModelsEl.style.color = '#cfcfd6';
-            setTimeout(() => { quotaModelsEl.style.color = ''; }, 400);
+    function updateSidebar(V) {
+
+        const v = (V && typeof V === 'object' && 'p1' in V) ? V : buildRings();
+        const p1 = v.p1, p2 = v.p2, p3 = v.p3;
+        const reqs = v.reqs;
+
+        const el1 = document.getElementById('mw-sb-pct-1'),
+            el2 = document.getElementById('mw-sb-pct-2'),
+            el3 = document.getElementById('mw-sb-pct-3');
+        setTextBump(el1, fmtPct(p1, '%'));
+
+        setTextBump(el2, fmtPct(p2, '%'));
+        setTextBump(el3, fmtPct(p3, '%'));
+        renderRing3Logo(v.model3, p3);
+        setSbRing('mw-sb-ring-1', p1 != null ? p1 / 100 : 0);
+        setSbRing('mw-sb-ring-2', p2 != null ? p2 / 100 : 0);
+        setSbRing('mw-sb-ring-3', p3 != null ? p3 / 100 : 0);
+
+        const f1 = document.getElementById('mw-pop-fill-1'),
+            f2 = document.getElementById('mw-pop-fill-2'),
+            f3 = document.getElementById('mw-pop-fill-3');
+        if (f1) f1.style.width = (p1 != null ? p1 : 0) + '%';
+        if (f2) f2.style.width = (p2 != null ? p2 : 0) + '%';
+        if (f3) f3.style.width = (p3 != null ? Math.min(100, p3) : 0) + '%';
+        renderModelBlocks();
+
+        const u1 = document.getElementById('mw-pop-used-1'),
+            u2 = document.getElementById('mw-pop-used-2'),
+            u3 = document.getElementById('mw-pop-used-3');
+
+        setTextBump(u1, p1 != null ? fmtPct(p1) + ' utilisé' : '—');
+
+        if (u2) {
+            if (!v.real.length) u2.textContent = 'Aucune requête sur la fenêtre';
+            else if (v.elapsedMs < 60000) u2.textContent = 'Fenêtre qui démarre';
+            else u2.textContent = fmtDurMin(Math.round(v.elapsedMs / 60000)) + ' écoulées sur 3 h';
         }
 
-        const requests = getRequests();
-        const now = Date.now();
-        let oldestRemaining = null;
-        let elapsedPct = 0;
+        if (u3) {
+            u3.innerHTML = p3 != null
 
-        if (requests.length === 0) {
+                ? '<b>' + fmtPct(p3) + '</b>\u00A0<span class="mw-dot"></span>\u00A0' + escapeHtml(v.model3)
+                : '—';
+        }
+
+        const r2 = document.getElementById('mw-pop-reset-2'), r3 = document.getElementById('mw-pop-reset-3');
+
+        if (r2) r2.innerText = v.oldestRem == null ? '—'
+            : v.oldestRem > 0 ? 'libération dans ' + fmtHrMin(v.oldestRem)
+            : 'libération en cours';
+        if (r3) r3.innerText = v.modelAge;
+
+        const rm = document.getElementById('mw-pop-reset-models');
+        if (rm) { rm.innerText = modelNamesResetLabel(); rm.classList.toggle('stale', v.stale); }
+        const rmw = document.getElementById('mw-widget-models-reset');
+        if (rmw) { rmw.textContent = modelNamesResetLabel(); rmw.classList.toggle('stale', v.stale); }
+
+        const tEl = document.getElementById('mw-pop-time');
+        if (tEl) tEl.innerText = new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', hour12: false });
+
+        const d1 = document.getElementById('mw-sb-dot-1'), d2 = document.getElementById('mw-sb-dot-2'), d3 = document.getElementById('mw-sb-dot-3');
+        if (d1) d1.classList.toggle('on', p1 != null && p1 >= 90);
+        if (d2) d2.classList.toggle('on', p2 != null && p2 >= 90);
+        if (d3) d3.classList.toggle('on', p3 != null && p3 >= 90);
+
+        const bl = document.getElementById('mw-pop-blocked');
+        if (bl) {
+            const on = POOL.setBlockedFrom(v.poolUsed, v.poolTotal);
+            bl.innerText = on ? '⛔ pool épuisé — requêtes bloquées côté site' : '';
+            bl.style.display = on ? 'block' : 'none';
+        }
+        const warn = document.getElementById('mw-pop-total-warning');
+        if (warn) {
+            const w = POOL.warning();
+            warn.innerText = w || '';
+            warn.style.display = w ? 'block' : 'none';
+        }
+        return v;
+    }
+
+    // Ticks
+    let _lastHeavyTs = 0;
+    function updateUI(forceHeavy) {
+        const now = Date.now();
+        const heavy = forceHeavy === true || (now - _lastHeavyTs) >= CFG.heavyTickMs;
+        if (heavy) _lastHeavyTs = now;
+
+        maybePruneRequests();
+        const v = buildRings();
+        setPercentDisplay(v);
+        const requests = v.reqs, real = v.real;
+
+        if (real.length === 0) {
             countdownEl.classList.remove('mw-pulse-text');
             if (countdownEl.innerText !== '00:00:00') countdownEl.innerText = '00:00:00';
             const txt = 'Aucune requête en fenêtre glissante';
             if (statusEl.innerText !== txt) statusEl.innerText = txt;
             progressTimerEl.style.width = '0%';
         } else {
-            const oldest = requests[0];
-            const newest = requests[requests.length - 1];
-            oldestRemaining = Math.max(0, oldest.ts + WINDOW_MS - now);
-            const newestRemaining = Math.max(0, newest.ts + WINDOW_MS - now);
-            elapsedPct = Math.min(100, ((WINDOW_MS - oldestRemaining) / WINDOW_MS) * 100);
-
-            const totalCents = requests.reduce((s, r) => s + (numberOrNull(r.cents) || 0), 0);
-            const oldestTxt = formatHMS(oldestRemaining);
-
+            const oldestTxt = formatHMS(v.oldestRem);
             if (countdownEl.innerText !== oldestTxt) countdownEl.innerText = oldestTxt;
-            countdownEl.classList.toggle('mw-pulse-text', oldestRemaining <= 0);
+            countdownEl.classList.toggle('mw-pulse-text', v.oldestRem <= 0);
 
-            const newStatus = `${requests.length} req · ${totalCents.toFixed(2)}¢ · dernier libéré dans ${formatHMS(newestRemaining)}`;
+            const newStatus = real.length + ' req · prochaine libération dans ' + fmtHrMin(v.newestRem);
             if (statusEl.innerText !== newStatus) statusEl.innerText = newStatus;
-            progressTimerEl.style.width = elapsedPct.toFixed(1) + '%';
+            progressTimerEl.style.width = (v.p2 != null ? v.p2 : 0) + '%';
         }
 
-        updateMini(oldestRemaining, elapsedPct);
-updateSimulator(requests);
+        updateMini(v.oldestRem, v.p2 != null ? v.p2 : 0, v);
+        updateSidebar(v);
+
+        updateSyncIndicator();
+        if (!heavy) return;
+        updateSimulator(real);
         updateApiTimestamp();
         refreshApiBadgeFromStorage();
-        populateDailyModelSelect();
-        updateSidebar();
+        updateModelsSubtitle();
     }
 
-    /* ================= NOMS DE MODÈLES ================= */
+    function updateModelsSubtitle() {
+        const map = modelPctMap();
+        const names = Object.keys(map).filter(isDisplayableModelKey)
+            .sort((a, b) => map[b] - map[a]);
+        const txt = names.length ? names.join('  ·  ') : (localStorage.getItem(STORAGE_KEY_MODELS) || '');
+        if (txt && quotaModelsEl.textContent !== txt) {
+            quotaModelsEl.textContent = txt;
+            quotaModelsEl.style.color = '#cfcfd6';
+            setTimeout(() => { quotaModelsEl.style.color = ''; }, 400);
+        }
+        if (!txt && quotaModelsEl.textContent) quotaModelsEl.textContent = 'Cliquez sur Rafraîchir pour scanner';
+    }
+
+    // Noms de modèles
     function beautifyModelName(raw) {
         if (raw == null) return '';
         let s = String(raw).trim().toLowerCase();
@@ -1420,7 +1909,8 @@ updateSimulator(requests);
         s = s.replace(/([a-z]{2,})(\d)/g, '$1 $2');
         s = s.replace(/(\d)b\b/g, '$1B');
         s = s.replace(/\ba(\d+B)\b/g, 'A$1');
-        s = s.replace(/\b(gpt|glm|api|ai|llm|opus)\b/g, m => m.toUpperCase());
+
+        s = s.replace(/\b(gpt|glm|api|ai|llm)\b/g, m => m.toUpperCase());
         s = s.replace(/\bdeepseek\b/g, 'DeepSeek');
         s = s.replace(/\bminimax\b/g, 'MiniMax');
         s = s.replace(/\bkimi\b/g, 'Kimi');
@@ -1443,192 +1933,186 @@ updateSimulator(requests);
         return '';
     }
 
-    /* ================= CALIBRATION ================= */
-    function calibrateIfPending() {
-        if (typeof _harvestInFlight !== 'undefined' && _harvestInFlight) {
-            return numberOrNull(localStorage.getItem(STORAGE_KEY_QUOTA_TOTAL));
-        }
-        const isSettingsPage = window.location.pathname.includes('/app/account/settings');
-        if (!isSettingsPage) {
-            return numberOrNull(localStorage.getItem(STORAGE_KEY_QUOTA_TOTAL));
-        }
-        if (localStorage.getItem(STORAGE_KEY_CALIBRATE_PENDING) !== '1') {
-            return numberOrNull(localStorage.getItem(STORAGE_KEY_QUOTA_TOTAL));
-        }
-        const now = Date.now();
-        const lastCal = parseInt(localStorage.getItem(STORAGE_KEY_LAST_CALIBRATION) || '0', 10);
-        if (now - lastCal < CALIBRATION_COOLDOWN_MS) {
-            localStorage.setItem(STORAGE_KEY_CALIBRATE_PENDING, '0');
-            console.log('[MammouthWidget] Calibration skipped (cooldown)');
-            return numberOrNull(localStorage.getItem(STORAGE_KEY_QUOTA_TOTAL));
-        }
-        const domTs = parseInt(localStorage.getItem(STORAGE_KEY_DOM_PERCENT_TS) || '0', 10);
-        if (now - domTs > 5000) {
-            localStorage.setItem(STORAGE_KEY_CALIBRATE_PENDING, '0');
-            return numberOrNull(localStorage.getItem(STORAGE_KEY_QUOTA_TOTAL));
-        }
-        const domP = numberOrNull(localStorage.getItem(STORAGE_KEY_DOM_PERCENT));
-        const domPrecise = numberOrNull(localStorage.getItem(STORAGE_KEY_DOM_PCT_PRECISE));
-        let domVal = (domPrecise !== null && domPrecise > 0.2 && domPrecise < 100) ? domPrecise : domP;
-        const gLiveCal = readPoolGauge();
-        if (gLiveCal && gLiveCal.filtered) {
-            localStorage.setItem(STORAGE_KEY_CALIBRATE_PENDING, '0');
-            console.log('[MammouthWidget] Calibration annulée — jauge pool filtrée/ambiguë en ce moment');
-            return numberOrNull(localStorage.getItem(STORAGE_KEY_QUOTA_TOTAL));
-        }
-        if (gLiveCal && gLiveCal.precise !== null && gLiveCal.precise > 0.2 && gLiveCal.precise < 100) {
-            domVal = gLiveCal.precise;
-        }
-        if (poolGuardActive()) {
-            localStorage.setItem(STORAGE_KEY_CALIBRATE_PENDING, '0');
-            console.log('[MammouthWidget] Calibration annulée — harvest en cours / trop récent (garde pool)');
-            return numberOrNull(localStorage.getItem(STORAGE_KEY_QUOTA_TOTAL));
-        }
-        if (poolReadingImplausible(domVal)) {
-            localStorage.setItem(STORAGE_KEY_CALIBRATE_PENDING, '0');
-            logImplausiblePool(domVal);
-            return numberOrNull(localStorage.getItem(STORAGE_KEY_QUOTA_TOTAL));
-        }
-        if (domVal === null || domVal <= 0 || domVal >= 100) {
-            localStorage.setItem(STORAGE_KEY_CALIBRATE_PENDING, '0');
-            console.warn('[MammouthWidget] Invalid DOM% for calibration:', domVal);
-            return numberOrNull(localStorage.getItem(STORAGE_KEY_QUOTA_TOTAL));
-        }
-        let raw = numberOrNull(localStorage.getItem(STORAGE_KEY_RAW_USED));
-        if (raw === null || raw <= 0) {
-            const cacheTs = parseInt(localStorage.getItem(STORAGE_KEY_RAW_USED_CACHE_TS) || '0', 10);
-            if (now - cacheTs <= RAW_USED_CACHE_TTL_MS) {
-                raw = numberOrNull(localStorage.getItem(STORAGE_KEY_RAW_USED_CACHE));
-                if (raw !== null) console.log('[MammouthWidget] Using cached rawUsedSum:', raw);
-            }
-        }
-        if (domVal !== null && domVal > 0 && domVal < 100 && raw !== null && raw > 0) {
-            let total = raw / (domVal / 100);
-            const prevTotal = numberOrNull(localStorage.getItem(STORAGE_KEY_QUOTA_TOTAL));
-            if (prevTotal !== null && prevTotal > 0 && (total > prevTotal * 6 || total < prevTotal / 6)) {
-                localStorage.setItem(STORAGE_KEY_CALIBRATE_PENDING, '0');
-                console.log('[MammouthWidget] Calibration refusée — total irréaliste:', prevTotal.toFixed(2), '→', total.toFixed(2), '(DOM', domVal + '%, usage', raw.toFixed(2) + ')');
-                return prevTotal;
-            }
-            if (total > 0) {
-                localStorage.setItem(STORAGE_KEY_QUOTA_TOTAL, String(total));
-                localStorage.setItem(STORAGE_KEY_CALIBRATE_PENDING, '0');
-                localStorage.setItem(STORAGE_KEY_LAST_CALIBRATION, String(now));
-                console.log('[MammouthWidget] Calibration (verrouillée): total =', total.toFixed(2), 'crédits (DOM', domVal + '%, usage brut', raw.toFixed(2) + ')');
-                return total;
-            }
-        }
-        localStorage.setItem(STORAGE_KEY_CALIBRATE_PENDING, '0');
-        return numberOrNull(localStorage.getItem(STORAGE_KEY_QUOTA_TOTAL));
-    }
-    function computePercentFromRaw(rawUsedSum) {
-        if (rawUsedSum === null) return null;
-        const total = numberOrNull(localStorage.getItem(STORAGE_KEY_QUOTA_TOTAL));
-        if (total !== null && total > 0) return Math.max(0, Math.min(100, Math.round((rawUsedSum / total) * 100)));
-        return null;
-    }
+    // Calibration
+    const CALIB = {
+        _s: null,
+        state() {
+            if (!this._s) this._s = readJSON(STORAGE_KEY_CALIB_STATE, null) || { state: 'IDLE', reads: [], retries: 0, lastRunTs: 0 };
+            return this._s;
+        },
+        save() { setJSON(STORAGE_KEY_CALIB_STATE, this._s); },
+        request(reason) {
+            const s = this.state();
+            if (s.state === 'COMMITTED' && Date.now() - s.lastRunTs < 10 * 60 * 1000) return;
+            s.state = 'PENDING'; s.reason = reason || 'manuel';
+            s.reads = []; s.retries = 0; s.queuedTs = Date.now(); s.softSince = 0;
+            this.save();
+            console.log('[MammouthWidget] calibration demandée (' + s.reason + ')');
+        },
 
-    let _divergeCount = 0;
-    let _divergeLastTs = 0;
-    let _divergeFirstTs = 0;
-    function recalibrateIfDivergent() {
-        try {
-            if (typeof _harvestInFlight !== 'undefined' && _harvestInFlight) return;
-            const now = Date.now();
-            const domTs = parseInt(localStorage.getItem(STORAGE_KEY_DOM_PERCENT_TS) || '0', 10);
-            if (!domTs || now - domTs > 60 * 1000) { _divergeCount = 0; _divergeFirstTs = 0; return; }
-            const total = numberOrNull(localStorage.getItem(STORAGE_KEY_QUOTA_TOTAL));
-            if (total === null || total <= 0) return;
-            const lastAuto = parseInt(localStorage.getItem(STORAGE_KEY_LAST_AUTOCAL) || '0', 10);
-            if (now - lastAuto < 60 * 1000) return;
-            let raw = numberOrNull(localStorage.getItem(STORAGE_KEY_RAW_USED));
-            if (raw === null || raw <= 0) {
-                const cacheTs = parseInt(localStorage.getItem(STORAGE_KEY_RAW_USED_CACHE_TS) || '0', 10);
-                if (now - cacheTs <= RAW_USED_CACHE_TTL_MS) raw = numberOrNull(localStorage.getItem(STORAGE_KEY_RAW_USED_CACHE));
+        tick() {
+            if (typeof _harvestInFlight !== 'undefined' && _harvestInFlight) return null;
+            const s = this.state();
+            if (s.state === 'IDLE' || s.state === 'COMMITTED') return null;
+            if (s.state === 'PENDING') {
+
+                if (poolGuardActive()) { this._defer('garde pool active (harvest en cours)', true); return null; }
+                if (Date.now() - (s.queuedTs || 0) < CALIBRATION_COOLDOWN_MS) return null;
+                s.state = 'SETTLING'; s.reads = []; this.save();
             }
-            if (raw === null || raw <= 0) return;
-            const gLive = readPoolGauge();
-            if (!gLive || gLive.filtered || gLive.ambiguous ||
-                gLive.precise === null || gLive.precise <= 0.2 || gLive.precise >= 100) {
-                _divergeCount = 0; _divergeFirstTs = 0;
+            if (s.state !== 'SETTLING') return null;
+            if (Date.now() - (s.lastRunTs || 0) < CFG.calibSettleGapMs) return null;
+
+            const g = readPoolGauge();
+
+            if (!g) { this._defer('jauge pool absente', true); return null; }
+            const brandFilterActive = (() => { try { return detectBrandFilterActive(g.bar); } catch { return false; } })();
+            if (brandFilterActive) { this._defer('jauge pool filtrée (marque active)', true); return null; }
+            if (g.ambiguous) {
+                const s0 = this.state();
+                s0.ambigSince = s0.ambigSince || Date.now();
+                this.save();
+                if (Date.now() - s0.ambigSince < CFG.calibAmbigGraceMs) {
+                    this._defer('jauge pool ambiguë (largeur incertaine) — attente avant recal', true);
+                    return null;
+                }
+
+                const ord = toPercentStrict(g.bar && g.bar.getAttribute('aria-valuenow'));
+                if (ord === null || ord <= 0.2 || ord >= 100) {
+                    this._defer('jauge pool ambiguë SANS aria-valuenow exploitable', true);
+                    return null;
+                }
+                console.log('[MammouthWidget] calibration — jauge « ambiguous » persistée, reprise sur aria-valuenow(' + ord + ' %)');
+                g.precise = ord;
+                g.round = ord;
+            } else {
+
+                const s0 = this.state();
+                if (s0.ambigSince) { s0.ambigSince = 0; this.save(); }
+            }
+            if (g.precise === null || g.precise <= 0.2 || g.precise >= 100) { this._defer('jauge pool illisible (' + g.precise + ')', g.precise === null); return null; }
+            if (poolReadingImplausible(g.precise)) { this._defer('lecture pool incohérente avec l\'usage', true); logImplausiblePool(g.round); return null; }
+
+            const raw = freshRawUsed();
+            if (raw === null || raw <= 0) { this._defer('usage brut inconnu'); return null; }
+            s.reads.push({ ts: Date.now(), pct: g.precise });
+            s.lastRunTs = Date.now();
+            if (s.reads.length < CFG.calibSettleReads) { this.save(); return null; }
+
+            const pcts = s.reads.map(r => r.pct);
+            const spread = Math.max(...pcts) - Math.min(...pcts);
+            if (spread > CFG.calibMaxSpread) { this._defer('lectures instables (spread ' + spread.toFixed(2) + ' %)', true); return null; }
+
+            const domVal = pcts.reduce((a, b) => a + b, 0) / pcts.length;
+            const prevTotal = POOL.totalCents;
+            const newTotal = raw / (domVal / 100);
+            if (!(newTotal > 0)) { this._defer('total calculé invalide'); return null; }
+            if (prevTotal != null && prevTotal > 0 && (newTotal > prevTotal * 6 || newTotal < prevTotal / 6)) {
+                this._defer('total irréaliste ' + fmtCentsFr(prevTotal) + ' → ' + fmtCentsFr(newTotal));
+                return null;
+            }
+            POOL.commit({ usedCents: raw, totalCents: newTotal, source: 'calibration' });
+            refusePlanPoolIfDivergent(newTotal);
+            localStorage.setItem(STORAGE_KEY_LAST_CALIBRATION, String(Date.now()));
+            POOL.clearWarning();
+            s.state = 'COMMITTED'; s.retries = 0; s.lastRunTs = Date.now(); s.softSince = 0;
+            s.total = newTotal; this.save();
+            console.log('[MammouthWidget] calibration VALIDÉE : total ' + fmtCentsFr(newTotal)
+                + ' (jauge ' + domVal.toFixed(2) + ' % ± ' + spread.toFixed(2) + ', usage ' + fmtCentsFr(raw) + ')');
+            return newTotal;
+        },
+
+        _defer(why, soft) {
+            const s = this.state();
+            if (soft) {
+
+                s.state = 'PENDING';
+                s.queuedTs = Date.now() + CFG.calibSoftRetryMs;
+                s.softSince = s.softSince || Date.now();
+                this.save();
+                if (Date.now() - (s.softLogTs || 0) > CFG.calibSoftLogMs) {
+                    s.softLogTs = Date.now(); this.save();
+                    console.log('[MammouthWidget] calibration en attente (' + why + ') — reprise automatique');
+                }
+                if (Date.now() - s.softSince > CFG.calibSoftExpireMs) {
+                    s.state = 'IDLE'; s.reads = []; s.retries = 0; s.softSince = 0;
+                    this.save();
+                    console.log('[MammouthWidget] calibration expirée après ' + Math.round(CFG.calibSoftExpireMs / 60000)
+                        + ' min d\'attente — le total reste celui du plan. Relance avec « Rafraîchir ♻️ » sur la page Réglages → Abonnement (la jauge « Quota d\'utilisation » doit y être visible, sans marque sélectionnée).');
+                }
                 return;
             }
-            if (poolGuardActive()) { _divergeCount = 0; _divergeFirstTs = 0; return; }
-            const domVal = gLive.precise;
-            const computed = (raw / total) * 100;
-            const diff = Math.abs(computed - domVal);
-            if (diff < 0.5) { _divergeCount = 0; _divergeFirstTs = 0; return; }
-            const large = diff > Math.max(2.5, computed * 0.6);
-            if (now - _divergeLastTs > 5000) {
-                _divergeCount++; _divergeLastTs = now;
-                if (!_divergeFirstTs) _divergeFirstTs = now;
-                if (large && _divergeCount <= 2) {
-                    console.log('[MammouthWidget] divergence pool/usage notable (jauge ' + domVal.toFixed(2) + '% vs calculé ' + computed.toFixed(2) + '%) — recalibration différée (garde anti-lecture contaminée)');
-                }
+            s.retries = (s.retries || 0) + 1;
+            if (s.retries > CFG.calibMaxRetries) {
+                s.state = 'IDLE'; s.retries = 0; s.reads = [];
+                this.save();
+                console.log('[MammouthWidget] calibration abandonnée après ' + CFG.calibMaxRetries + ' tentatives — ' + why);
+                return;
             }
-            const needCount = large ? 6 : 2;
-            const needSpan = large ? 90000 : 0;
-            if (_divergeCount >= needCount && now - _divergeFirstTs >= needSpan) {
-                const newTotal = raw / (domVal / 100);
-                if (newTotal > total * 6 || newTotal < total / 6) {
-                    console.log('[MammouthWidget] Recalibration refusée — total irréaliste:', total.toFixed(2), '→', newTotal.toFixed(2), '(jauge', domVal + '%, usage', raw.toFixed(2) + ')');
-                    _divergeCount = 0; _divergeFirstTs = 0;
-                    return;
-                }
-                localStorage.setItem(STORAGE_KEY_QUOTA_TOTAL, String(newTotal));
-                localStorage.setItem(STORAGE_KEY_LAST_AUTOCAL, String(now));
-                _divergeCount = 0; _divergeFirstTs = 0;
-                console.log('[MammouthWidget] Recalibration auto: total', total.toFixed(2), '→', newTotal.toFixed(2), 'crédits (jauge pool', domVal + '%, calculé', computed.toFixed(2) + '%, usage brut', raw.toFixed(2) + ')');
-                const p = Math.max(0, Math.min(100, Math.round((raw / newTotal) * 100)));
-                localStorage.setItem(STORAGE_KEY_QUOTA, String(p));
-                updateUI();
-            }
-        } catch (e) { console.warn('[MammouthWidget] recalibrateIfDivergent err', e); }
+            s.state = 'PENDING';
+            s.queuedTs = Date.now() + CFG.calibRetryBackoffMs;
+            this.save();
+            console.log('[MammouthWidget] calibration différée (' + s.retries + '/' + CFG.calibMaxRetries + ') : ' + why);
+        },
+    };
+
+    function freshRawUsed() {
+        const r = numberOrNull(localStorage.getItem(STORAGE_KEY_RAW_USED));
+        if (r != null && r > 0) {
+            const ts = parseInt(localStorage.getItem(STORAGE_KEY_RAW_USED_CACHE_TS) || '0', 10);
+            if (ts && Date.now() - ts <= RAW_USED_FRESH_MS) return r;
+        }
+        const cTs = parseInt(localStorage.getItem(STORAGE_KEY_RAW_USED_CACHE_TS) || '0', 10);
+        const c = numberOrNull(localStorage.getItem(STORAGE_KEY_RAW_USED_CACHE));
+        if (c != null && cTs && Date.now() - cTs <= RAW_USED_FRESH_MS) return c;
+        return r != null && r > 0 ? r : null;
+    }
+    function computePercentFromRaw(rawUsedSum) {
+        return POOL.computePct(rawUsedSum, POOL.totalCents);
     }
 
+    // Sources
     function parseQuotaResponse(data) {
-        const result = { percent: null, models: null, rawUsedSum: null, byModel: null };
-        if (data == null) return result;
+        const result = { ok: false, reason: null, percent: null, modelsList: null, rawUsedSum: null, byBrandNames: [] };
+        if (data == null || typeof data !== 'object') { result.reason = 'réponse vide'; return result; }
 
         const directPct = [data.percent, data.percentUsed, data.usagePercent, data.quotaPercent,
-            data.quota && data.quota.percent,
-
-            data.usage && data.usage.percent].find(v => toPercent(v) !== null);
+            data.quota && data.quota.percent, data.usage && data.usage.percent]
+            .find(v => toPercent(v) !== null);
         if (directPct !== undefined) result.percent = toPercent(directPct);
 
         if (Array.isArray(data.byBrand)) {
-            let sum = 0;
-            let found = false;
-            const map = {};
-            const brandAlias = { anthropic: 'Claude', claude: 'Claude', 'xai': 'Grok', grok: 'Grok', openai: 'GPT', gpt: 'GPT', google: 'Gemini', gemini: 'Gemini', meta: 'Llama', llama: 'Llama', deepseek: 'DeepSeek', mistral: 'Mistral' };
+            let sum = 0, found = false;
+            const names = [];
             for (const b of data.byBrand) {
-                const v = numberOrNull(b && b.value);
-                const rawBrand = String(b && (b.brand || b.name || b.model || b.id) || '').trim();
-                let beautified = beautifyModelName(rawBrand);
-                if (!beautified) beautified = rawBrand ? rawBrand.charAt(0).toUpperCase() + rawBrand.slice(1) : '';
-                const alias = brandAlias[rawBrand.toLowerCase()];
-                if (v !== null) {
-                    sum += v; found = true;
-                    if (beautified) map[beautified] = v;
-                    if (alias && alias !== beautified) map[alias] = v;
-                    map[rawBrand.toLowerCase()] = v;
-                }
+                const v = numberOrNull(b && (b.value != null ? b.value : b.amount));
+                if (v === null || v < 0) continue;
+                sum += v; found = true;
+                const raw = String(b && (b.brand || b.name || b.model || b.id) || '').trim();
+                if (raw) names.push(beautifyModelName(raw) || raw);
             }
-            if (found) { result.rawUsedSum = sum; result.byModel = map; }
+            if (found) {
+
+                const total = numberOrNull(localStorage.getItem(STORAGE_KEY_QUOTA_TOTAL));
+                let okUnit = true;
+                if (sum > 0 && sum <= 1.001) { okUnit = false; result.reason = 'byBrand somme un RATIO (' + sum + ') — ignoré'; }
+                else if (sum > 0 && sum <= 100 && total != null && total > 20 && sum / total < 0.005) { okUnit = false; result.reason = 'byBrand somme un POURCENTAGE (' + sum + ') alors que le pool vaut ' + fmtCentsFr(total) + ' — ignoré'; }
+                if (okUnit) { result.rawUsedSum = sum; result.byBrandNames = names; }
+                else sum = 0;
+            }
         }
 
         const modelsArr = Array.isArray(data.usedModels) ? data.usedModels
             : Array.isArray(data.models) ? data.models : null;
         if (modelsArr && modelsArr.length) {
+
             const names = modelsArr
                 .map(m => beautifyModelName(typeof m === 'string' ? m : (m && (m.name || m.model || m.id))))
                 .filter(Boolean);
-            if (names.length) {
-                result.models = names.length > 3
-                    ? names.slice(0, 3).join(', ') + ` +${names.length - 3}`
-                    : names.join(', ');
-            }
+            if (names.length) result.modelsList = [...new Set(names)];
         }
+        result.ok = true;
+        if (!result.reason) result.reason = 'ok';
         return result;
     }
 
@@ -1639,7 +2123,7 @@ updateSimulator(requests);
         '[aria-label="Usage du quota"]',
     ];
 
-    /* ================= SCAN DOM ================= */
+    // Scan du DOM
     function findQuotaBar(root) {
         for (const selector of QUOTA_BAR_SELECTORS) {
             const el = root.querySelector(selector);
@@ -1649,20 +2133,52 @@ updateSimulator(requests);
     }
 
     function isBrandFilterBtn(b) {
-        const l = (b.getAttribute && b.getAttribute('aria-label')) || '';
-        return l.includes("d'utilisation") && l.includes('Cliquez pour filtrer');
+        if (!b) return false;
+        const l = (((b.getAttribute && b.getAttribute('aria-label')) || '') + ' ' + (b.textContent || '')).toLowerCase();
+        if (!l.trim()) return false;
+        return /cliquez\s*(?:pour)?\s*filtrer/.test(l)
+            || /\bfiltrer\b[^.]{0,40}(utilisation|usage|quota)/.test(l)
+            || /\bfiltrer\s+(par|les?)\b/.test(l);
+    }
+    const BRAND_STOPWORDS = /^(cliquez|voir|le|la|les|votre|utilisation|usage|quota|filtrer|par|sur|total|marque|mod[eè]le|modèles|et|ou|de|du|des|d')$/i;
+
+    function brandFromLabel(label) {
+        const raw = String(label || '').replace(/\s+/g, ' ').trim();
+        if (!raw) return '';
+        const head = (raw.split(/\s+[—–-]\s+|\s+\|\s+|\s+—/)[0] || '').trim();
+        if (head && head.length <= 26 && !/filtr|utilisation|usage|quota/i.test(head) && !BRAND_STOPWORDS.test(head)) return head;
+
+        const words = raw.replace(/\([^)]*\)/g, ' ').split(/\s+/);
+        for (const w of words) {
+            const c = w.replace(/[^\p{L}\p{N}\s.+_-]/gu, '').trim();
+            if (!c || c.length > 22) continue;
+            if (BRAND_STOPWORDS.test(c)) continue;
+            if (/filtrer|utilisation|usage|quota|cliquez/i.test(c)) continue;
+            if (/^[A-ZÀ-Ý]/.test(c)) return c;
+        }
+        return '';
     }
     function gaugeCardFor(bar) {
+        const ownerBody = (bar && bar.ownerDocument && bar.ownerDocument.body) || document.body;
         return bar.closest('section')
             || (bar.parentElement && (bar.parentElement.parentElement || bar.parentElement))
-            || document.body;
+            || ownerBody;
     }
-    function classifyQuotaBars() {
+
+    function classifyQuotaBars(doc = document) {
         const isWidget = (el) => !!(el && el.closest && el.closest('#mammouth-widget, #mw-sidebar, #mw-popover'));
         const sel = QUOTA_BAR_SELECTORS.join(', ');
-        const bars = [...document.querySelectorAll(sel)].filter(b => !isWidget(b));
+        let bars = [...doc.querySelectorAll(sel)].filter(b => !isWidget(b));
+
+        if (!bars.length) {
+            bars = [...doc.querySelectorAll('[role="progressbar"]')].filter(b => {
+                if (isWidget(b)) return false;
+                const lbl = ((b.getAttribute('aria-label') || '') + ' ' + (b.getAttribute('aria-valuetext') || '')).toLowerCase();
+                return /quota|utilisation/.test(lbl);
+            });
+        }
         const brandNames = new Set();
-        [...document.querySelectorAll('button[aria-label]')].filter(isBrandFilterBtn).forEach(b => {
+        [...doc.querySelectorAll('button[aria-label]')].filter(isBrandFilterBtn).forEach(b => {
             const brand = ((b.getAttribute('aria-label') || '').split('—')[0] || '').trim().toLowerCase();
             if (brand) brandNames.add(brand);
         });
@@ -1670,7 +2186,7 @@ updateSimulator(requests);
             if (bar.contains(b) || b.closest('[role="progressbar"]')) return false;
             if (isBrandFilterBtn(b)) return true;
             const t = String(b.textContent || '').trim().toLowerCase();
-return !!t && brandNames.has(t);
+            return !!t && brandNames.has(t);
         });
         const nameOf = new Map();
         for (const bar of bars) nameOf.set(bar, findModelNameForBar(bar));
@@ -1701,8 +2217,12 @@ return !!t && brandNames.has(t);
             break;
         }
         if (!pool && bars.length) {
-            pool = bars.find(b => !matchesModelWidth(preciseWidthOf(b)))
-                || (modelWidths.length ? null : bars[0]);
+
+            pool = bars.find(b => {
+                const nm = nameOf.get(b);
+                if (nm && !GENERIC_TITLE_RE.test(nm)) return false;
+                return !matchesModelWidth(preciseWidthOf(b));
+            }) || (modelWidths.length ? null : bars[0]);
         }
         return { bars, pool };
     }
@@ -1742,13 +2262,30 @@ return !!t && brandNames.has(t);
         }
         return out;
     }
+
+    let _gaugeCache = { ts: 0, sig: '', val: null };
+    function gaugeSignature() {
+        try {
+            const sel = QUOTA_BAR_SELECTORS.join(', ');
+            const bars = document.querySelectorAll(sel);
+            return bars.length + '|' + (bars[0] ? bars[0].getAttribute('aria-valuenow') : '');
+        } catch { return 'x'; }
+    }
     function readPoolGauge(allowDuringHarvest) {
         if (!allowDuringHarvest && typeof _harvestInFlight !== 'undefined' && _harvestInFlight) return null;
+        const now = Date.now();
+        const sig = gaugeSignature();
+        if (_gaugeCache.val && _gaugeCache.sig === sig && now - _gaugeCache.ts < CFG.gaugeCacheMs) return _gaugeCache.val;
+        const val = readPoolGaugeUncached();
+        _gaugeCache = { ts: now, sig: val ? sig : _gaugeCache.sig, val };
+        return val;
+    }
+    function readPoolGaugeUncached() {
         const { pool } = classifyQuotaBars();
         if (!pool) return null;
         let round = null;
         const nowAttr = pool.getAttribute('aria-valuenow');
-        if (nowAttr != null) round = toPercent(nowAttr);
+        if (nowAttr != null) round = toPercentStrict(nowAttr);
         const widths = [...pool.querySelectorAll('[style*="width"]')]
             .map(el => { const m = /width\s*:\s*([\d.]+)%/.exec(el.getAttribute('style') || ''); return m ? parseFloat(m[1]) : null; })
             .filter(w => w !== null && Number.isFinite(w) && w > 0.05 && w < 100);
@@ -1771,7 +2308,13 @@ return !!t && brandNames.has(t);
         if (g.round === null) return null;
         if (poolGuardActive()) return null;
         const chk = g.precise != null ? g.precise : g.round;
-        if (poolReadingImplausible(chk)) { logImplausiblePool(g.round); return null; }
+        if (poolReadingImplausible(chk)) {
+            logImplausiblePool(g.round);
+            localStorage.setItem(STORAGE_KEY_DOM_PERCENT, String(g.round));
+            localStorage.setItem(STORAGE_KEY_DOM_PCT_PRECISE, String(g.precise));
+            localStorage.setItem(STORAGE_KEY_DOM_PERCENT_TS, String(Date.now()));
+            return null;
+        }
         localStorage.setItem(STORAGE_KEY_DOM_PERCENT, String(g.round));
         localStorage.setItem(STORAGE_KEY_DOM_PCT_PRECISE, String(g.precise));
         localStorage.setItem(STORAGE_KEY_DOM_PERCENT_TS, String(Date.now()));
@@ -1789,9 +2332,10 @@ return !!t && brandNames.has(t);
                 node = node && node.parentElement;
                 if (!node || node === document.body) break walkUp;
             }
+            if (node === ((bar.ownerDocument && bar.ownerDocument.body) || document.body)) break walkUp;
             const kids = [...node.children];
             const ownerIdx = kids.findIndex(k => k.contains(bar));
-if (ownerIdx <= 0) continue;
+                if (ownerIdx <= 0) continue;
             for (let j = ownerIdx - 1; j >= 0; j--) {
                 const sib = kids[j];
                 if (sib.querySelector && sib.querySelector('[role="progressbar"]')) break walkUp;
@@ -1807,15 +2351,16 @@ if (ownerIdx <= 0) continue;
         }
         if (found) return found;
         try {
+            const ownerBody = (bar.ownerDocument && bar.ownerDocument.body) || document.body;
             const card = gaugeCardFor(bar);
-            const scope = (card && card !== document.body) ? card : document.body;
+            const scope = (card && card !== ownerBody) ? card : ownerBody;
             const heads = [...scope.querySelectorAll('h1,h2,h3,h4,h5,[class*="font-semibold"],[class*="font-bold"]')].filter(h => {
                 if (h.closest('button') || h.closest('[role="progressbar"]')) return false;
                 if (bar.contains(h)) return false;
                 const t = String(h.innerText || h.textContent || '').trim().replace(/\s+/g, ' ');
                 if (!t || t.length > 60) return false;
                 if (GENERIC_TITLE_RE.test(t)) return false;
-if (/d['’]utilisation/i.test(t)) return false;
+                if (/d['’]utilisation/i.test(t)) return false;
                 if (isPureBrandKey(t)) return false;
                 return true;
             });
@@ -1827,11 +2372,11 @@ if (/d['’]utilisation/i.test(t)) return false;
                 let dist = null;
                 if (barTop !== null && h.getBoundingClientRect) {
                     const r = h.getBoundingClientRect();
-if (r && Number.isFinite(r.top)) dist = barTop - r.top;
+                    if (r && Number.isFinite(r.top)) dist = barTop - r.top;
                 }
                 if (dist === null) {
                     if (!(bar.compareDocumentPosition(h) & Node.DOCUMENT_POSITION_PRECEDING)) continue;
-} else if (dist < 0 || dist > 160) continue;
+                } else if (dist < 0 || dist > 160) continue;
                 if (dist < bestDist) { bestDist = dist; best = t; }
             }
             if (best) return best;
@@ -1839,17 +2384,19 @@ if (r && Number.isFinite(r.top)) dist = barTop - r.top;
         return '';
     }
 
-    function scanModelSections() {
-        const { bars, pool } = classifyQuotaBars();
+    function scanModelSections(doc = document) {
+        const { bars, pool } = classifyQuotaBars(doc);
         if (!bars.length) return [];
         const modelBars = bars.filter(b =>
             !pool || (b !== pool && !pool.contains(b) && !b.contains(pool)));
         const out = [];
         const seen = new Set();
         for (const bar of modelBars) {
-            const rawPct = bar.getAttribute('aria-valuenow') != null ? bar.getAttribute('aria-valuenow') : bar.getAttribute('aria-valuetext');
-            const pct = toPercent(rawPct);
-            if (pct == null || pct < 0 || pct > 100) continue;
+
+            const nowPct = toPercentStrict(bar.getAttribute('aria-valuenow'));
+            const txtPct = toPercentStrict(bar.getAttribute('aria-valuetext'));
+            const pct = (txtPct != null && (nowPct == null || txtPct > nowPct)) ? txtPct : nowPct;
+            if (pct == null || pct < 0 || pct > 1000) continue;
             let name = findModelNameForBar(bar);
             if (!name) continue;
             name = name.replace(/\s*[—–-]\s*[\d.,]+\s*%\s*d['’]utilisation\.?\s*$/i, '').trim();
@@ -1864,29 +2411,145 @@ if (r && Number.isFinite(r.top)) dist = barTop - r.top;
         return out;
     }
 
-    function officialModelSectionSeen() {
+    // Lecture de la page abonnement
+    const SUBSCRIPTION_LEGEND_BAD_RE = /^\d+$|^\d+\s*%$|^%$|^x\d+$|^\s*·\s*$/i;
+    function legendNameForButton(btn) {
+        let name = '';
         try {
-            const isWidget = (el) => !!(el && el.closest && el.closest('#mammouth-widget, #mw-sidebar, #mw-popover'));
-            const els = document.querySelectorAll('h1,h2,h3,h4,h5,h6,p,span,div');
-            for (const el of els) {
-                if (isWidget(el)) continue;
-                if (el.closest && el.closest('[role="progressbar"]')) continue;
-                const t = String(el.textContent || '').trim().replace(/\s+/g, ' ');
-                if (t.length > 60) continue;
-                if (/quota\s+par\s+mod[eè]le/i.test(t)) return true;
+            for (const s of btn.querySelectorAll('span')) {
+                const t = String(s.textContent || '').trim();
+                if (!t) continue;
+                if (/^\s*[\d.,]+\s*%/.test(t)) break;
+                if (SUBSCRIPTION_LEGEND_BAD_RE.test(t)) break;
+                name = t; break;
             }
         } catch {}
-        return false;
+        if (!name) name = brandFromLabel(btn.getAttribute('aria-label') || btn.title || btn.innerText || '');
+        return name;
+    }
+    function readSubscriptionQuotaSection(doc = document) {
+        const DOC = doc || document;
+        const bodyTxt = (() => { try { return String((DOC.body && DOC.body.innerText) || '').replace(/\s+/g, ' '); } catch { return ''; } })();
+        const isSubPage =
+            !!(DOC.getElementById && DOC.getElementById('usage_quota')) ||
+            /quota\s+d['’]utilisation/i.test(bodyTxt) ||
+            /utilisation\s+totale\s+du\s+quota/i.test(bodyTxt);
+        const result = { isSubPage, pool: null, models: [], segments: [] };
+        if (!isSubPage) return result;
+        const isWidgetNode = (el) => !!(el && el.closest && el.closest('#mammouth-widget, #mw-sidebar, #mw-popover, [id^="mw-"]'));
+        const section = (DOC.getElementById && DOC.getElementById('usage_quota')) || null;
+        const scope = isWidgetNode(section) ? DOC.body : (section || DOC.body);
+
+        const pbars = [...scope.querySelectorAll('[role="progressbar"]')].filter(b => !isWidgetNode(b));
+        const poolBar = (readPoolGaugeIn(DOC, true) || {}).bar || (pbars.find(b => /utilisation\s+du\s+quota/i.test(b.getAttribute('aria-label') || '')) || pbars[0]);
+        if (poolBar) {
+            const nowVal = toPercentStrict(poolBar.getAttribute('aria-valuenow'));
+            const txtVal = toPercentStrict(poolBar.getAttribute('aria-valuetext')) || toPercentStrict((poolBar.textContent || '').trim());
+            const pct = (nowVal != null && txtVal != null) ? Math.max(nowVal, txtVal) : (nowVal != null ? nowVal : txtVal);
+            if (pct != null) result.pool = pct;
+        }
+
+        const seen = new Set();
+
+        for (const btn of scope.querySelectorAll('button[aria-label]')) {
+            if (isWidgetNode(btn)) continue;
+            const label = (btn.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim();
+            if (!label || !(label.toLowerCase().includes("d'utilisation") || label.toLowerCase().includes("d’utilisation"))) continue;
+            const pctSeg = toPercentStrict((label.match(/([.,]?\d+(?:[.,]\d+)?)\s*%\s*d['’]utilisation/i) || [])[1]);
+            const brand = (label.split(/[—–]/)[0] || '').trim();
+            if (!brand || pctSeg == null || seen.has(brand.toLowerCase())) continue;
+            seen.add(brand.toLowerCase());
+            result.segments.push({ brand, pct: pctSeg });
+        }
+        for (const btn of scope.querySelectorAll('button')) {
+            if (isWidgetNode(btn)) continue;
+
+        }
+
+        return result;
+    }
+
+    let _officialCache = { ts: 0, val: false };
+    function officialModelSectionSeen(doc = document) {
+        const now = Date.now();
+        if (doc === document && now - _officialCache.ts < CFG.officialSectionCacheMs) return _officialCache.val;
+        let val = false;
+        try {
+            if (/quota\s+par\s+mod[eè]le/i.test(doc.body.textContent || '')) {
+                const hit = [...doc.querySelectorAll('h1,h2,h3,h4,h5,h6,p,span,div')]
+                    .find(el => !(el.closest && el.closest('#mammouth-widget, #mw-sidebar, #mw-popover, [role="progressbar"]'))
+                        && /quota\s+par\s+mod[eè]le/i.test(String(el.textContent || '').slice(0, 120)));
+                val = !!hit;
+            }
+        } catch {}
+        if (doc === document) _officialCache = { ts: now, val };
+        return val;
+    }
+
+    let _modalHarvestTs = 0;
+
+    async function maybeHarvestModelsFromModal() {
+        if (typeof _harvestInFlight !== 'undefined' && _harvestInFlight) return;
+        if (Date.now() - _modalHarvestTs < 60000) return;
+
+        if (inHarvestPopup()) return;
+        if (!officialModelSectionSeen()) return;
+        _modalHarvestTs = Date.now();
+        let secs = scanModelSections();
+        let grew = false;
+        let quietMs = 0;
+        if (!secs.length) {
+            for (let i = 0; i < 5 && !secs.length; i++) {
+                await new Promise(r => setTimeout(r, 550));
+                secs = scanModelSections();
+            }
+        } else {
+
+            const stepMs = 550, quietNeeded = 4000, maxSteps = 14;
+            for (let i = 0; i < maxSteps; i++) {
+                await new Promise(r => setTimeout(r, stepMs));
+                const again = scanModelSections();
+                const grew = again.some(s => !secs.some(x => x.name === s.name));
+                if (grew) {
+                    const merged = {};
+                    for (const s of secs) merged[s.name] = s.pct;
+                    for (const s of again) merged[s.name] = s.pct;
+                    secs = Object.entries(merged).map(([name, pct]) => ({ name, pct }));
+                    quietMs = 0;
+                    grew = true;
+                    continue;
+                }
+                if (again.length && again.length === secs.length) secs = again;
+                quietMs += stepMs;
+                if (quietMs >= quietNeeded) break;
+            }
+        }
+        if (!secs.length) {
+            console.log('[MammouthWidget] popup officielle du quota ouverte — 0 jauge par modèle trouvée');
+            return;
+        }
+        const map = {};
+        for (const s of secs) map[s.name] = s.pct;
+
+        const complete = quietMs >= CFG.calibSettleGapMs * 8 && grew === false;
+        if (storeModelPct(map, 'modal', { complete, confidence: complete ? 0.95 : 0.55 })) {
+            console.log('[MammouthWidget] harvest via popup officielle (' + (complete ? 'complet' : 'partiel') + ') →',
+                secs.length, 'modèle(s):', secs.map(x => x.name + ' ' + x.pct + '%').join(', '));
+                updateSidebar();
+        }
     }
 
     async function harvestModelQuotasViaDom() {
+
+        if (inHarvestPopup()) return;
         if (_harvestInFlight) return;
         if (!window.location.pathname.includes('/app/account/settings')) {
-            console.log('[MammouthWidget] harvest reporté — va sur /app/account/settings puis Rafraîchir');
+            console.log('[MammouthWidget] harvest reporté — va sur /app/account/settings/subscription puis Rafraîchir');
             return;
         }
         const quotaBar = (readPoolGauge(true) || {}).bar || findQuotaBar(document);
         if (!quotaBar) return;
+
         const seenBrands = new Set();
         const brandBtns = [...document.querySelectorAll('button[aria-label]')].filter(b => {
             const l = b.getAttribute('aria-label') || '';
@@ -1902,19 +2565,19 @@ if (r && Number.isFinite(r.top)) dist = barTop - r.top;
             const g = readPoolGauge(true);
             if (g && g.round !== null) return g.round;
             const bar = findQuotaBar(document) || quotaBar;
-            return toPercent(bar && bar.getAttribute('aria-valuenow'));
+            return toPercentStrict(bar && bar.getAttribute('aria-valuenow'));
         };
-        const waitGauge = (prev, ms=1600) => new Promise(res => {
-            const step = 60;
-            let ticks = 0;
-            const maxTicks = Math.max(2, Math.ceil(ms / step));
+
+        const waitGauge = (prev, ms = 1600) => new Promise(res => {
+            const t0 = Date.now();
             const iv = setInterval(() => {
-                const cur = getGauge();
-                if (cur !== prev || ++ticks >= maxTicks) { clearInterval(iv); res(cur); }
-            }, step);
+                let cur = null;
+                try { cur = getGauge(); } catch (e) { cur = null; }
+                if (cur !== prev || (Date.now() - t0) >= ms) { clearInterval(iv); res(cur); }
+            }, CFG.popupProbeStepMs);
         });
         const globalBefore = getGauge();
-const harvested = {};
+        const harvested = {};
         const mergeScan = () => { const secs = scanModelSections(); for (const s of secs) harvested[s.name] = s.pct; return secs.length; };
         const findBtn = (brand) => [...document.querySelectorAll('button[aria-label]')].find(b => {
             const l = b.getAttribute('aria-label')||''; return l.toLowerCase().startsWith(brand.toLowerCase()+' —') || l.toLowerCase().includes(brand.toLowerCase()+' —');
@@ -1930,18 +2593,41 @@ const harvested = {};
             if (scoped) return scoped;
             return [...document.querySelectorAll('button')].filter(b => !isWidgetNode(b)).find(matchesClear);
         };
+
+        const isChipActive = (b) => {
+            if (!b) return false;
+            if (b.getAttribute('aria-pressed') === 'true' || b.getAttribute('aria-checked') === 'true') return true;
+            return String(b.getAttribute('data-state') || '').toLowerCase() === 'on';
+        };
+        const clearFilterOrToggle = (fallbackBrand) => {
+            const clear = findClearBtn();
+            if (clear) { clear.click(); return true; }
+            const chip = fallbackBrand
+                ? findBtn(fallbackBrand)
+                : [...document.querySelectorAll('button[aria-label]')].filter(b => !isWidgetNode(b) && isBrandFilterBtn(b)).find(isChipActive);
+            if (chip) { chip.click(); return true; }
+            return false;
+        };
         try {
-            const directCount = mergeScan();
+            let directCount = mergeScan();
+            if (!directCount && officialModelSectionSeen()) {
+
+                for (let i = 0; i < 8 && !directCount; i++) {
+                    await new Promise(r => setTimeout(r, 600));
+                    directCount = mergeScan();
+                }
+                if (directCount) console.log('[MammouthWidget] blocs modèles apparus après attente');
+            }
             console.log('[MammouthWidget] scan direct →', directCount, 'modèle(s) visible(s)');
-            const brandFamilies = brandBtns.map(b => brandFamilyOf(((b.getAttribute('aria-label')||'').split('—')[0]||'').trim()));
-            const storedNames = displayableModelNames(readJSON(STORAGE_KEY_MODEL_PCT, {}));
+            const brandFamilies = brandBtns.map(b => brandFamilyOf(brandFromLabel(b.getAttribute('aria-label') || b.textContent)));
+            const storedNames = modelNames();
             const covered = directCount > 0
                 && brandFamilies.every(f => !!f && Object.keys(harvested).some(n => brandFamilyOf(n) === f))
                 && storedNames.every(n => Object.keys(harvested).some(k => k.toLowerCase() === n.toLowerCase()));
             if (!covered) for (let i = 0; i < brandBtns.length; i++) {
                 let btn = brandBtns[i];
                 const label0 = btn.getAttribute('aria-label') || '';
-                let brandRaw = (label0.split('—')[0] || '').trim();
+                let brandRaw = brandFromLabel(label0);
                 if (!brandRaw) continue;
                 const fresh = findBtn(brandRaw);
                 if (fresh) btn = fresh;
@@ -1957,10 +2643,10 @@ const harvested = {};
                 const beforeClick = getGauge();
                 const curBtn = findBtn(brandRaw) || btn;
                 curBtn.click();
-notePoolActivity();
+                notePoolActivity();
                 await waitGauge(beforeClick);
                 await new Promise(r => setTimeout(r, 220));
-const nFound = mergeScan();
+                const nFound = mergeScan();
                 console.log('[MammouthWidget] harvest filtre', brandRaw, '→', nFound, 'modèle(s) scanné(s)');
                 const clearBtn = findClearBtn();
                 if (clearBtn) { clearBtn.click(); await waitGauge(beforeClick); }
@@ -1982,7 +2668,7 @@ const nFound = mergeScan();
                     if (clear) { clear.click(); }
                     else {
                         const last = brandBtns[brandBtns.length - 1];
-                        const lastBrand = ((last.getAttribute('aria-label')||'').split('—')[0]||'').trim();
+                        const lastBrand = brandFromLabel(last.getAttribute('aria-label') || last.textContent);
                         const bb = findBtn(lastBrand) || last;
                         bb.click();
                     }
@@ -1994,39 +2680,68 @@ const nFound = mergeScan();
             }
             const stillLive = !!(readPoolGauge(true) || findQuotaBar(document));
             const scanComplete = covered || brandBtns.length > 0;
-            const authoritative = stillLive && scanComplete;
+
+            const restored = (after === globalBefore);
+            const sectionSeen = officialModelSectionSeen();
+            const complete = stillLive && scanComplete && restored && sectionSeen;
             if (Object.keys(harvested).length) {
-                storeModelPct(harvested, 'dom', { authoritative });
-                populateDailyModelSelect();
-                updateSidebar();
-            } else if (authoritative && officialModelSectionSeen()) {
-                await new Promise(r => setTimeout(r, 900));
-                const recheck = mergeScan();
-                if (!recheck) {
-                    if (storeModelPct({}, 'dom', { authoritative: true })) {
-                        populateDailyModelSelect();
+                storeModelPct(harvested, 'dom', { complete, confidence: covered ? 0.95 : 0.6 });
                         updateSidebar();
-                    }
-                } else {
-                    storeModelPct(harvested, 'dom', { authoritative });
-                    populateDailyModelSelect();
-                    updateSidebar();
-                }
+            } else if (complete) {
+
+                storeModelPct({}, 'dom', { complete: true, confidence: 0.9 });
+                        updateSidebar();
             } else {
-                console.log('[MammouthWidget] harvest: aucune jauge par modèle détectée — les blocs modèles doivent être affichés sous la jauge totale');
+                console.log('[MammouthWidget] harvest: scan INCOMPLET (restauré=' + restored
+                    + ', section=' + sectionSeen + ') — fusion conservatrice, aucune suppression');
             }
         } finally {
+
+            try { restoreGlobalFilter(globalBefore, getGauge, findClearBtn); } catch (e) { console.warn('[MammouthWidget] restauration filtre err', e); }
             _harvestInFlight = false;
         }
     }
+
+    function restoreGlobalFilter(globalBefore, getGauge, findClearBtn) {
+        if (globalBefore == null) return true;
+        for (let attempt = 0; attempt < 4 && getGauge() !== globalBefore; attempt++) {
+            const clear = findClearBtn();
+            if (clear) clear.click();
+            else {
+
+                const active = [...document.querySelectorAll('button[aria-label]')]
+                    .filter(b => !b.closest('#mammouth-widget, #mw-sidebar, #mw-popover') && isBrandFilterBtn(b))
+                    .find(b => b.getAttribute('data-state') === 'on' || b.getAttribute('aria-pressed') === 'true');
+                if (active) { active.click(); continue; }
+                const b = findQuotaTriggerCandidates(document).find(c => /d['’]utilisation/i.test(String(c.el.getAttribute('aria-label') || '')));
+                if (b) b.el.click();
+            }
+            notePoolActivity();
+        }
+        const ok = getGauge() === globalBefore;
+        if (ok) { console.log('[MammouthWidget] filtre marque restauré ✓'); }
+        else {
+            notePoolActivity(120000);
+            POOL.flagTotalWarning('Filtre du site NON restauré (le quota peut rester figé) — '
+                + 'coche « Effacer » dans le panneau Quota de mammouth.ai.');
+            console.warn('[MammouthWidget] ⚠ filtre marque NON restauré — l\'utilisateur doit décocher le filtre manuellement');
+        }
+        return ok;
+    }
     let _bgHarvestInFlight = false;
+    let _adviceLogTs = 0;
+    let _bgHarvestAttemptTs = 0;
     async function backgroundHarvestIfNeeded(force) {
         if (_bgHarvestInFlight || _harvestInFlight) return;
         if (window.location.pathname.includes('/app/account/settings')) return;
+
+        const minGap = force ? 30 * 1000 : 5 * 60 * 1000;
+        if (Date.now() - _bgHarvestAttemptTs < minGap) return;
         const ts = parseInt(localStorage.getItem(STORAGE_KEY_MODEL_PCT_TS) || '0', 10);
         if (!force && ts && Date.now() - ts < 4 * 60 * 1000) return;
+        _bgHarvestAttemptTs = Date.now();
         _bgHarvestInFlight = true;
-        console.log('[MammouthWidget] background harvest via fetch…');
+        if (force) console.log('[MammouthWidget] background harvest via fetch…');
         try {
             const candidates = [
                 '/api/user/quota', '/api/user/quotas', '/api/user/usage', '/api/user/limits',
@@ -2067,31 +2782,458 @@ const nFound = mergeScan();
             if (found && Object.keys(found).length) {
                 if (storeModelPct(found, 'fetch')) {
                     console.log('[MammouthWidget] background harvest done (fetch, par modèle)');
-                    populateDailyModelSelect(); updateSidebar();
+                    updateSidebar();
                     return;
                 }
             }
-            if (force) {
-                console.log('[MammouthWidget] ouverture popup harvest…');
-                try {
-                    localStorage.setItem('mammouth_harvest_popup', String(Date.now()));
-                    const w = window.open('/app/account/settings', 'mw_harvest', 'width=400,height=400,left=-1000,top=-1000');
-                    if (!w) console.warn('[MammouthWidget] popup bloqué — autorise les popups pour mammouth.ai');
-                    else {
-                        setTimeout(() => { try { if (!w.closed) w.close(); } catch {} }, 25000);
-                    }
-                } catch(e) { console.warn('[MammouthWidget] popup err', e); }
-                return;
+
+            _bgHarvestInFlight = false;
+            if (harvestViaPopupWindow('auto')) return;
+
+            if (Date.now() - _lastPopupHarvestTs < 15 * 60 * 1000) return;
+            if (Date.now() - _adviceLogTs > 15 * 60 * 1000) {
+                _adviceLogTs = Date.now();
+                console.log('[MammouthWidget] background harvest: clique « Récupérer les quotas par modèle » dans le widget (petite fenêtre automatique) — ou ouvre la popup officielle du quota');
             }
-            console.log('[MammouthWidget] background harvest: va une fois sur Réglages → Quota (ou clique Rafraîchir pour ouvrir le popup auto)');
         } catch(e) { console.warn('[MammouthWidget] background harvest err', e); }
         finally { _bgHarvestInFlight = false; setTimeout(()=>{ _bgHarvestInFlight=false; }, 2000); }
     }
 
-    let apiInFlight = false;
-    const _origFetch = window.fetch.bind(window);
+    // Harvest par modèle
+    let _popupHarvest = null;
+    let _lastPopupHarvestTs = 0;
 
-    /* ================= FETCH QUOTA API ================= */
+    const _popupWindows = new Set();
+    function trackPopupWindow(w) { if (w) _popupWindows.add(w); }
+    function untrackPopupWindow(w) { if (w) _popupWindows.delete(w); }
+    function closeTrackedPopupWindows() {
+        for (const w of Array.from(_popupWindows)) {
+            try { if (w && !w.closed) w.close(); } catch {}
+            _popupWindows.delete(w);
+        }
+
+    }
+    let _lastUserGestureTs = 0;
+
+    function inHarvestPopup() { try { return String(window.name || '').startsWith('mw_harvest'); } catch { return false; } }
+    function noteUserGesture() { _lastUserGestureTs = Date.now(); }
+
+    function finishPopupHarvest(why) {
+        const st = _popupHarvest;
+        if (!st) return;
+        _popupHarvest = null;
+        if (st.timer) clearInterval(st.timer);
+        try { if (st.win && !st.win.closed) st.win.close(); } catch {}
+        untrackPopupWindow(st.win);
+        console.log('[MammouthWidget] petite fenêtre harvest fermée (' + why + ')');
+    }
+
+    const POPUP_SCROLL_STEP = 320;
+    function gentleScrollPopup(w, doc, st) {
+        try {
+            const els = [...doc.querySelectorAll('h1,h2,h3,h4,[role="progressbar"]')];
+            const cand = els.find(el => /quota/i.test(String(el.innerText || el.textContent || '')));
+            if (cand && cand.scrollIntoView) { cand.scrollIntoView({ behavior: 'smooth', block: 'center' }); return true; }
+            const s2 = st || {};
+            if (s2.scrollN === undefined) { s2.scrollN = 0; s2.scrollTop0 = 0; }
+            const docH = (doc.documentElement && doc.documentElement.scrollHeight) || 0;
+            const max = Math.max(0, docH - (w.innerHeight || 0));
+            const phase = s2.scrollN < 5 ? 1 : s2.scrollN < 8 ? -1 : 0;
+            if (!phase) return false;
+            s2.scrollTop0 = Math.max(0, Math.min(max, s2.scrollTop0 + phase * POPUP_SCROLL_STEP));
+            s2.scrollN++;
+            if (w.scrollTo) w.scrollTo({ top: s2.scrollTop0, behavior: 'smooth' });
+            return true;
+        } catch { return false; }
+    }
+
+    function findQuotaTriggerCandidates(doc) {
+        const out = [];
+        const seen = new Set();
+        const isWidgetNode = (el) => !!(el.closest && el.closest('#mammouth-widget, [id^="mw-"]'));
+        const push = (el, score) => {
+            if (!el || typeof el.click !== 'function' || isWidgetNode(el)) return;
+            if (el.disabled || el.getAttribute('aria-disabled') === 'true') return;
+            if (seen.has(el)) return;
+            seen.add(el);
+            out.push({ el, score });
+        };
+        try {
+
+            for (const el of doc.querySelectorAll('button, [role="tab"], [role="button"], [role="menuitem"], a[href]')) {
+                const t = ((el.getAttribute('aria-label') || '') + ' ' + (el.title || '') + ' ' + String(el.innerText || el.textContent || ''))
+                    .replace(/\s+/g, ' ').trim().toLowerCase();
+                if (!t || t.length > 60) continue;
+                if (/quota\s+par\s+mod[eè]le/.test(t)) push(el, 6);
+                else if (/voir\s+(votre\s+|le\s+|la\s+)?quota/.test(t)) push(el, 5);
+                else if (/\bquota\b/.test(t)) push(el, 4);
+            }
+
+            for (const bar of doc.querySelectorAll('[role="progressbar"]')) {
+                const lbl = (bar.getAttribute('aria-label') || '').toLowerCase();
+                if (!lbl.includes('quota')) continue;
+                const wrap = bar.closest('button, [role="button"], a[href]');
+                if (wrap) push(wrap, 3);
+            }
+        } catch {}
+        out.sort((a, b) => b.score - a.score);
+        return out;
+    }
+
+    // Aide popup
+    function brandFilterChips(doc) {
+        const out = [];
+        const seen = new Set();
+        for (const b of doc.querySelectorAll('button[aria-label]')) {
+            if (!isBrandFilterBtn(b)) continue;
+            if (b.closest('#mammouth-widget, #mw-sidebar, #mw-popover')) continue;
+            const brand = brandFromLabel(b.getAttribute('aria-label') || b.textContent || '');
+            if (!brand || seen.has(brand.toLowerCase())) continue;
+            seen.add(brand.toLowerCase());
+            out.push({ brand, el: b });
+        }
+        return out;
+    }
+    function chipIsActive(el) {
+        if (el.getAttribute('aria-pressed') === 'true') return true;
+        if (el.getAttribute('aria-checked') === 'true') return true;
+        const ds = (el.getAttribute('data-state') || '').toLowerCase();
+        return ds === 'on' || ds === 'checked' || ds === 'active' || ds === 'true';
+    }
+
+    function clearPopupFilter(doc, chip) {
+        try {
+            const bar = (readPoolGaugeIn(doc, true) || {}).bar;
+            const scope = bar ? gaugeCardFor(bar) : doc.body;
+            const cand = [...scope.querySelectorAll('button')].filter(b => !b.closest('#mammouth-widget, #mw-sidebar, #mw-popover'));
+            const clear = cand.find(b => {
+                const t = (((b.getAttribute('aria-label') || '') + ' ' + (b.innerText || '')).toLowerCase()).trim();
+                return (t.includes('effacer') || t.includes('clear') || t === '×' || t === 'x' || t === '✕') && !chipIsActive(b);
+            });
+            const target = clear || (chip && chip.el);
+            if (target) { target.click(); return true; }
+            return false;
+        } catch { try { if (chip && chip.el) { chip.el.click(); return true; } } catch {} return false; }
+    }
+
+    function readPoolGaugeIn(doc, allowDuringHarvest) {
+        if (!allowDuringHarvest && _harvestInFlight) return null;
+        const { pool } = classifyQuotaBars(doc);
+        if (!pool) return null;
+        const round = pool.getAttribute('aria-valuenow') != null ? toPercentStrict(pool.getAttribute('aria-valuenow')) : null;
+        return { round, bar: pool };
+    }
+
+    function popupBanner(doc, text, tone) {
+        try {
+            let el = doc.getElementById('mw-harvest-banner');
+            if (!el) {
+                el = doc.createElement('div');
+                el.id = 'mw-harvest-banner';
+                el.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:2147483647;'
+                    + 'font:600 12px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;'
+                    + 'padding:9px 12px;color:#fff;background:#1a1a22;border-bottom:1px solid rgba(255,255,255,.12);'
+                    + 'box-shadow:0 6px 20px rgba(0,0,0,.35);pointer-events:none;text-align:center';
+                doc.body.appendChild(el);
+            }
+            el.textContent = '🐘 Mammouth · ' + text;
+            el.style.background = tone === 'ok' ? '#12351f' : tone === 'warn' ? '#3a2a12' : '#1a1a22';
+            return el;
+        } catch { return null; }
+    }
+
+    function assistPopupQuotaClick(doc, st) {
+        try {
+            if (!st.triedEls) st.triedEls = [];
+            if (!st.triedLabels) st.triedLabels = [];
+            for (const c of findQuotaTriggerCandidates(doc)) {
+                if (st.triedEls.indexOf(c.el) !== -1) continue;
+                const label = String(c.el.innerText || c.el.textContent || c.el.getAttribute('aria-label') || '')
+                    .replace(/\s+/g, ' ').trim().slice(0, 40) || 'élément quota';
+
+                const labelKey = label.toLowerCase();
+                if (st.triedLabels.indexOf(labelKey) !== -1) continue;
+                st.triedEls.push(c.el);
+                st.triedLabels.push(labelKey);
+                try { c.el.click(); } catch { return false; }
+                console.log('[MammouthWidget] assistance harvest — clic sur « ' + label + ' » dans la petite fenêtre');
+                return true;
+            }
+        } catch {}
+        return false;
+    }
+
+    function popupHarvestTick() {
+        const st = _popupHarvest;
+        if (!st) return 'inactif';
+        const w = st.win;
+        if (!w || w.closed) {
+
+            if (st.best > 0) { storeModelPct(st.accum, 'popup', { complete: false, confidence: 0.5 }); updateSidebar(); }
+            finishPopupHarvest(st.best > 0 ? 'ok (fenêtre fermée tôt, cumul conservé)' : 'fermée prématurément — aucun quota par modèle visible');
+            return 'fermee';
+        }
+        let doc = null;
+        try { doc = w.document; } catch { return 'indisponible'; }
+        if (!doc || !doc.body) return 'chargement';
+        if (doc !== st.lastDoc) {
+            st.lastDoc = doc; st.triedEls = []; st.triedLabels = [];
+            st.lastGrowthTs = Date.now();
+            if (st.phase === 'brands') { st.phase = 'passive'; st.chips = null; st.visited = {}; }
+        }
+        const elapsed = Date.now() - st.startTs;
+
+        try {
+            const secs = scanModelSections(doc);
+            st.lastScan = secs;
+            for (const s of secs) st.accum[s.name] = s.pct;
+        } catch {}
+        const count = Object.keys(st.accum).length;
+        if (count > st.best) { st.best = count; st.stable = 0; }
+        else if (count > 0) st.stable++;
+        if (count > (st.lastCount || 0)) st.lastGrowthTs = Date.now();
+        st.lastCount = count;
+        const quietMs = Date.now() - (st.lastGrowthTs || st.startTs);
+
+        const close = (why, complete) => {
+            if (complete && st.best > 0) {
+                const map = st.accum;
+                if (storeModelPct(map, 'popup', { complete: true, confidence: 0.95 })) { updateSidebar(); }
+
+                const stored = modelPctMap();
+                const readEntries = Object.keys(stored).filter(isDisplayableModelKey).map(n => [n, stored[n]]);
+                const lus = displayableModelNames(map).length;
+                console.log('[MammouthWidget] harvest petite fenêtre → ' + readEntries.length + ' modèle(s) en mémoire'
+                    + (readEntries.length ? ' : ' + readEntries.map(([n, p]) => n + ' ' + p + '%').join(', ') : '—')
+                    + ' (' + lus + ' lus dans la fenêtre, ' + (readEntries.length - lus) + ' conservés) — fermeture');
+            } else if (st.best > 0) {
+                storeModelPct(st.accum, 'popup', { complete: false, confidence: 0.5 });
+                updateSidebar();
+                console.log('[MammouthWidget] harvest petite fenêtre — ' + st.best + ' modèle(s) conservés (scan partiel)');
+            }
+            finishPopupHarvest(why);
+            return 'ok';
+        };
+
+        if (st.phase === 'passive') {
+            if (count > 0 && st.stable >= CFG.popupStableTicks && elapsed > 4000 && quietMs >= CFG.popupGrowthQuietMs) {
+                const complete = st.stable >= CFG.popupStableTicks && quietMs >= CFG.popupGrowthQuietMs && !st.relocated;
+                return close(complete ? 'ok' : 'ok (scan partiel, fusion conservatrice)', complete);
+            }
+
+            if (count === 0 && elapsed > CFG.popupFirstAssistMs && st.steps < CFG.popupMaxAssists
+                && Date.now() - st.lastStepTs > CFG.popupAssistGapMs) {
+                st.steps++; st.lastStepTs = Date.now();
+                const clicked = assistPopupQuotaClick(doc, st);
+                if (clicked) { st.lastAssistTs = Date.now(); st.lastGrowthTs = Date.now(); popupBanner(doc, 'ouverture du panneau quota…'); }
+
+                else gentleScrollPopup(w, doc, st);
+            }
+
+            if (elapsed > CFG.popupBrandPhaseMs) {
+                const chips = brandFilterChips(doc);
+                if (chips.length && count === 0) {
+                    st.phase = 'brands'; st.chips = chips; st.idx = 0; st.step = 0; st.waitUntil = 0; st.visited = {};
+                    notePoolActivity();
+                    console.log('[MammouthWidget] popup : ' + chips.length + ' filtre(s) marque détecté(s) → '
+                        + chips.map(c => c.brand).join(', ') + ' — parcours des marques (les jauges par modèle '
+                        + 'ne s\'affichent qu\'après sélection d\'une marque)');
+                    popupBanner(doc, 'lecture par marque : ' + chips.map(c => c.brand).join(' · '), 'warn');
+                    return 'en cours';
+                }
+            }
+
+            if (count === 0 && !st.relocated && st.steps >= 4
+                && elapsed > CFG.popupRelocateMinMs && elapsed < CFG.popupRelocateMaxMs
+                && (Date.now() - (st.lastAssistTs || 0) > CFG.popupRelocateIdleMs || st.steps >= CFG.popupMaxAssists)) {
+                st.relocated = true; st.triedEls = [];
+                try {
+                    console.log('[MammouthWidget] petite fenêtre → /app/account/settings/subscription (jauge officielle du quota)');
+                    popupBanner(doc, 'chargement de la page Abonnement…');
+                    w.location.href = (w.location && w.location.origin ? w.location.origin : window.location.origin) + '/app/account/settings/subscription';
+                } catch {}
+            }
+        }
+
+        if (st.phase === 'brands') {
+            if (Date.now() < (st.waitUntil || 0)) return 'en cours';
+            if (!st.chips || st.idx >= st.chips.length) {
+
+                const complete = st.brandRestored !== false && st.best > 0;
+                return close(complete ? 'ok (toutes les marques lues)' : 'ok (marques lues, filtre restauré partiellement)', complete);
+            }
+            if (st.step === 0) {
+
+                const fresh = brandFilterChips(doc);
+                if (!fresh.length) {
+                    console.log('[MammouthWidget] popup : pastilles disparues → retour au scan passif');
+                    st.phase = 'passive'; st.chips = null; st.idx = 0; st.visited = {};
+                    return 'en cours';
+                }
+                st.chips = fresh;
+                if (!st.visited) st.visited = {};
+                const pending = fresh.filter(c => !st.visited[c.brand.toLowerCase()]);
+                if (!pending.length) {
+                    const complete = st.brandRestored !== false && st.best > 0;
+                    return close(complete ? 'ok (toutes les marques lues)' : 'ok (marques lues, filtre restauré partiellement)', complete);
+                }
+                const chip = pending[0];
+                st.idx = fresh.indexOf(chip);
+                st.lastBrand = chip.brand;
+                st.visited[chip.brand.toLowerCase()] = true;
+                notePoolActivity();
+                try { chip.el.click(); } catch { return 'en cours'; }
+                st.step = 1;
+                st.waitUntil = Date.now() + CFG.popupBrandReadMs;
+                popupBanner(doc, 'marque ' + (st.idx + 1) + '/' + fresh.length + ' : ' + chip.brand + '…');
+                console.log('[MammouthWidget] popup — filtre marque « ' + chip.brand + ' » (' + (st.idx + 1) + '/' + fresh.length + ')');
+                return 'en cours';
+            }
+
+            const chip = (st.chips || []).find(c => c.brand === st.lastBrand) || { brand: st.lastBrand, el: null };
+            const secs = scanModelSections(doc);
+            for (const sec of secs) st.accum[sec.name] = sec.pct;
+            const cumul = Object.keys(st.accum).length;
+            if (cumul > st.best) { st.best = cumul; st.stable = 0; }
+            st.lastGrowthTs = Date.now();
+            popupBanner(doc, 'marque ' + (st.idx + 1) + '/' + (st.chips || []).length + ' : ' + chip.brand
+                + ' → ' + cumul + ' modèle(s) cumulés');
+            console.log('[MammouthWidget] popup — « ' + chip.brand + ' » lu : '
+                + (secs.map(x => x.name).join(', ') || 'aucune jauge'));
+            clearPopupFilter(doc, chip);
+            st.step = 0; st.idx++;
+            st.waitUntil = Date.now() + CFG.popupBrandRestoreMs;
+            if (chip.el) st.brandRestored = true;
+            return 'en cours';
+        }
+
+        if (elapsed > CFG.popupFailsafeMs) {
+            let diag = '';
+            try {
+                const labels = [...doc.querySelectorAll('[role="progressbar"]')].slice(0, 3).map(b => {
+                    const t = (b.getAttribute('aria-label') || b.getAttribute('aria-valuetext') || String(b.innerText || '')).replace(/\s+/g, ' ').trim();
+                    return t ? t.slice(0, 24) : 'sans-libellé';
+                });
+                diag = ' — diag: url=' + String((w.location && w.location.href) || '?')
+                    + ' · progressbars=' + doc.querySelectorAll('[role="progressbar"]').length
+                    + ' · pastilles marque=' + brandFilterChips(doc).length
+                    + ' · clics=' + (st.triedEls ? st.triedEls.length : 0)
+                    + ' · jauges=' + (labels.length ? labels.join(' | ') : '—');
+            } catch {}
+            if (st.best > 0) return close('délai dépassé' + diag, false);
+            popupBanner(doc, 'aucun quota par modèle trouvé — ' + diag, 'warn');
+            console.warn('[MammouthWidget] harvest popup : RIEN lu après ' + Math.round(elapsed / 1000) + ' s' + diag);
+            console.warn('[MammouthWidget] → ouvre /app/account/settings → panneau Quota, puis colle dans la console :');
+            console.warn('[MammouthWidget]   __mwDebug.diagnoseQuotaDOM()');
+            finishPopupHarvest('délai dépassé' + diag);
+            return 'timeout';
+        }
+        return 'en cours';
+    }
+    // Placement de la fenêtre
+    function popupTargetRect(W, H, gap) {
+        const g = gap == null ? 10 : gap;
+
+        const ox = Number.isFinite(window.mozInnerScreenX) ? window.mozInnerScreenX
+            : Number.isFinite(window.screenX) ? window.screenX : 0;
+        const oy = Number.isFinite(window.mozInnerScreenY) ? window.mozInnerScreenY
+            : Number.isFinite(window.screenY) ? window.screenY : 0;
+        const vw = window.innerWidth || (window.screen && window.screen.width) || 1280;
+        const vh = window.innerHeight || (window.screen && window.screen.height) || 800;
+        return {
+            left: Math.max(0, Math.round(ox + vw - W - g)),
+            top: Math.max(0, Math.round(oy + vh - H - g)),
+        };
+    }
+
+    function popupIsMisplaced(w, W, H) {
+        try {
+            if (!w || w.closed) return false;
+            const r = popupTargetRect(W, H);
+            if (w.outerWidth && Math.abs(w.outerWidth - W) > 60) return true;
+            if (w.outerHeight && Math.abs(w.outerHeight - H) > 90) return true;
+            const sx = Number.isFinite(w.mozScreenX) ? w.mozScreenX
+                : Number.isFinite(w.screenX) ? w.screenX : null;
+            const sy = Number.isFinite(w.mozScreenY) ? w.mozScreenY
+                : Number.isFinite(w.screenY) ? w.screenY : null;
+
+            if (sx !== null && sy !== null && (Math.abs(sx - r.left) > 60 || Math.abs(sy - r.top) > 60)) return true;
+            return false;
+        } catch { return false; }
+    }
+    function applyPopupRect(w, W, H) {
+        try {
+            if (!popupIsMisplaced(w, W, H)) return false;
+            const r = popupTargetRect(W, H);
+            if (typeof w.moveTo === 'function') w.moveTo(r.left, r.top);
+            if (typeof w.resizeTo === 'function') w.resizeTo(W, H);
+            return true;
+        } catch { return false; }
+    }
+
+    function harvestViaPopupWindow(reason) {
+        if (inHarvestPopup()) return false;
+        if (_harvestInFlight || _bgHarvestInFlight) return false;
+        if (_popupHarvest) return true;
+        const minGap = reason === 'auto' ? 10 * 60 * 1000 : 20 * 1000;
+        if (Date.now() - _lastPopupHarvestTs < minGap) return false;
+        if (reason === 'auto' && Date.now() - _lastUserGestureTs > 20000) return false;
+        let w = null;
+        const W = 360, H = 420;
+        try {
+
+            closeTrackedPopupWindows();
+            const rect = popupTargetRect(W, H);
+
+            const uniq = 'mw_harvest_' + Date.now().toString(36);
+
+            w = window.open('/app/account/settings/subscription', uniq,
+                'width=' + W + ',height=' + H + ',left=' + rect.left + ',top=' + rect.top +
+                ',menubar=no,toolbar=no,location=no,status=no,scrollbars=yes,resizable=yes');
+        } catch {}
+        _lastPopupHarvestTs = Date.now();
+        if (!w) {
+            console.log('[MammouthWidget] petite fenêtre bloquée par le navigateur — reclique 📥 ou passe par Réglages → Quota (lecture automatique ensuite)');
+            return false;
+        }
+
+        trackPopupWindow(w);
+        applyPopupRect(w, W, H);
+        setTimeout(() => applyPopupRect(w, W, H), 600);
+        setTimeout(() => { try { if (window.focus) window.focus(); } catch {} }, 60);
+        _popupHarvest = { win: w, startTs: Date.now(), lastGrowthTs: Date.now(), lastCount: 0, accum: {}, lastScan: [], best: 0, stable: 0, steps: 0, lastStepTs: 0, lastAssistTs: 0, triedLabels: [], timer: 0, phase: 'passive', chips: null, idx: 0, step: 0, waitUntil: 0, brandRestored: true, visited: {}, lastBrand: null };
+        _popupHarvest.timer = setInterval(popupHarvestTick, 700);
+        console.log('[MammouthWidget] petite fenêtre harvest ouverte (coin bas-droit) — lecture, parcours des marques, puis fermeture automatique ; ta page reste intacte');
+        return true;
+    }
+
+    let _syncIndicatorTs = 0;
+    function poolFreshnessLabel() {
+        const ts = POOL.lastPoolSyncTs();
+        if (!ts) return 'jamais synchronisé';
+        const sec = Math.max(0, Math.round((Date.now() - ts) / 1000));
+        if (sec < 5) return 'à l\'instant';
+        if (sec < 60) return 'il y a ' + sec + ' s';
+        if (sec < 3600) return 'il y a ' + Math.round(sec / 60) + ' min';
+        return 'il y a ' + Math.round(sec / 3600) + ' h';
+    }
+    function updateSyncIndicator() {
+        const el = document.getElementById('mw-pop-sync');
+        if (!el) return;
+        const now = Date.now();
+        if (now - _syncIndicatorTs > 5000) { _syncIndicatorTs = now; el.textContent = poolFreshnessLabel(); }
+        el.classList.toggle('syncing', !!POOL.isSyncing());
+    }
+
+    let apiInFlight = false;
+
+    const _hasFetch = typeof window.fetch === 'function';
+    const _origFetch = _hasFetch ? window.fetch.bind(window) : function () {
+        return Promise.reject(new Error('fetch indisponible'));
+    };
+    if (!_hasFetch) console.warn('[MammouthWidget] window.fetch indisponible — suivi API et mesure de coût désactivés');
+
+    // Fetch API quota
     function fetchQuotaFromAPI(silent) {
         if (!apiEnabled() || apiInFlight) return;
         apiInFlight = true;
@@ -2102,47 +3244,43 @@ const nFound = mergeScan();
             .then(data => {
                 console.log('[MammouthWidget] recentUsage →', data);
                 const parsed = parseQuotaResponse(data);
-
-                if (parsed.rawUsedSum !== null) {
-                    localStorage.setItem(STORAGE_KEY_RAW_USED, String(parsed.rawUsedSum));
-                    localStorage.setItem(STORAGE_KEY_RAW_USED_CACHE, String(parsed.rawUsedSum));
-                    localStorage.setItem(STORAGE_KEY_RAW_USED_CACHE_TS, String(Date.now()));
+                if (!parsed.ok) {
+                    logSourceRejection('recentUsage', parsed.reason, data);
+                    localStorage.setItem(STORAGE_KEY_API_TS, String(Date.now()));
+                    localStorage.setItem(STORAGE_KEY_API_OK, '1');
+                    setApiBadge('ok', 'API ✓ (lecture ignorée)');
+                    updateUI();
+                    return;
                 }
+                if (parsed.reason && parsed.reason !== 'ok') logSourceRejection('recentUsage', parsed.reason, null);
 
                 let pct = parsed.percent;
-                if (pct === null && parsed.rawUsedSum !== null) {
-                    pct = computePercentFromRaw(parsed.rawUsedSum);
+                const computed = parsed.rawUsedSum !== null ? computePercentFromRaw(parsed.rawUsedSum) : null;
+                if (pct !== null && computed !== null && Math.abs(computed - pct) > Math.max(CFG.poolImplausibleFloor, computed * CFG.poolImplausibleRel)) {
+                    console.log('[MammouthWidget] percent API (' + pct + '%) incohérent avec l\'usage (' + computed + '%) → valeur calculée retenue');
+                    pct = computed;
                 }
-                if (pct !== null && parsed.rawUsedSum !== null) {
-                    const computedPct = computePercentFromRaw(parsed.rawUsedSum);
-                    if (computedPct !== null && Math.abs(computedPct - pct) > Math.max(2.5, computedPct * 0.6)) {
-                        console.log('[MammouthWidget] percent API (' + pct + '%) incohérent avec l\u2019usage (' + computedPct + '%) → valeur calculée retenue');
-                        pct = computedPct;
-                    }
+                POOL.commit({
+                    usedCents: parsed.rawUsedSum !== null ? parsed.rawUsedSum : POOL.usedCents,
+                    totalCents: POOL.totalCents,
+                    source: 'recentUsage',
+                });
+
+                if (parsed.modelsList && parsed.modelsList.length) {
+                    localStorage.setItem(STORAGE_KEY_MODELS, parsed.modelsList.join('  ·  '));
                 }
-                if (pct !== null) localStorage.setItem(STORAGE_KEY_QUOTA, String(pct));
-                if (parsed.models) localStorage.setItem(STORAGE_KEY_MODELS, parsed.models);
-                if (parsed.byModel) {
-                    const pctMap = {};
-                    const globalPct = pct;
-                    const rawSum = parsed.rawUsedSum;
-                    const total = numberOrNull(localStorage.getItem(STORAGE_KEY_QUOTA_TOTAL));
-                    for (const [k, v] of Object.entries(parsed.byModel)) {
-                        let pv = null;
-                        if (total && total > 0) pv = Math.round((v / total) * 100);
-                        else if (globalPct != null && rawSum && rawSum > 0) pv = Math.round((v / rawSum) * globalPct);
-                        else pv = Math.round(v);
-                        pctMap[k] = Math.max(0, Math.min(100, pv));
-                    }
-                    const prev = readJSON(STORAGE_KEY_DAILY_BYMODEL, {});
-                    localStorage.setItem(STORAGE_KEY_DAILY_BYMODEL, JSON.stringify({ ...prev, ...pctMap }));
+                if (parsed.byBrandNames && parsed.byBrandNames.length) {
+                    setJSON(STORAGE_KEY_SOURCE_LOG, {
+                        ts: Date.now(), brands: parsed.byBrandNames,
+                        usedCents: parsed.rawUsedSum, totalCents: POOL.totalCents,
+                    });
                 }
 
                 localStorage.setItem(STORAGE_KEY_API_TS, String(Date.now()));
                 localStorage.setItem(STORAGE_KEY_API_OK, '1');
                 setApiBadge('ok', 'API ✓ synchronisé');
                 recordHistory();
-                updateUI();
+                updateUI(true);
             })
             .catch(err => {
                 console.warn('[MammouthWidget] recentUsage échec:', err.message);
@@ -2151,10 +3289,7 @@ const nFound = mergeScan();
                 const isSettingsPage = window.location.pathname.includes('/app/account/settings');
                 if (!isSettingsPage) {
                     const domPct = scanDomForPercent();
-                    if (domPct !== null) {
-                        localStorage.setItem(STORAGE_KEY_QUOTA, String(domPct));
-                        localStorage.setItem(STORAGE_KEY_DOM_PERCENT, String(domPct));
-                    }
+                    if (domPct !== null) localStorage.setItem(STORAGE_KEY_DOM_PERCENT, String(domPct));
                 } else if (!window.__mwApiRetry) {
                     window.__mwApiRetry = true;
                     console.log('[MammouthWidget] Retrying API on settings page...');
@@ -2167,15 +3302,10 @@ const nFound = mergeScan();
 
     let doneDebounce = 0;
 
-    /* ================= MESURE DU COÛT (currentUsage) ================= */
-    function getPendingRequest() {
-        try { return JSON.parse(localStorage.getItem(STORAGE_KEY_PENDING_REQUEST) || 'null'); } catch { return null; }
+    function clearPendingRequests() {
+        localStorage.removeItem(STORAGE_KEY_PENDING_REQUEST);
+        localStorage.removeItem(STORAGE_KEY_PENDING_QUEUE);
     }
-    function setPendingRequest(req) {
-        if (req) localStorage.setItem(STORAGE_KEY_PENDING_REQUEST, JSON.stringify(req));
-        else localStorage.removeItem(STORAGE_KEY_PENDING_REQUEST);
-    }
-    function clearPendingRequest() { localStorage.removeItem(STORAGE_KEY_PENDING_REQUEST); }
 
     function readCurrentUsage() {
         return _origFetch(CURRENT_USAGE_URL, { credentials: 'include', cache: 'no-store' })
@@ -2183,6 +3313,14 @@ const nFound = mergeScan();
             .then(d => {
                 console.log('[MammouthWidget] currentUsage →', d);
                 const c = numberOrNull(d && d.currentSpendCents);
+                if (c !== null && d && d.usagePlan) {
+                    if (healTotalFromPlan(c, String(d.usagePlan).toLowerCase()) !== null) updateUI();
+                }
+                if (c !== null) {
+
+                    localStorage.setItem(STORAGE_KEY_SPEND_CENTS, String(c));
+                    localStorage.setItem(STORAGE_KEY_SPEND_TS, String(Date.now()));
+                }
                 return c;
             })
             .catch(err => {
@@ -2191,51 +3329,113 @@ const nFound = mergeScan();
             });
     }
 
+    const MAX_PENDING = 3;
+    function getPendingQueue() {
+        const q = readJSON(STORAGE_KEY_PENDING_QUEUE, []);
+        return Array.isArray(q) ? q : [];
+    }
+    function pushPending(entry) {
+        const q = getPendingQueue();
+        q.push(entry);
+        while (q.length > MAX_PENDING) q.shift();
+        setJSON(STORAGE_KEY_PENDING_QUEUE, q);
+    }
+
+    function popPending(ts) {
+        const q = getPendingQueue();
+        const i = q.findIndex(e => e.ts === ts);
+        if (i === -1) return null;
+        const removed = q.splice(i, 1)[0];
+        if (q.length) setJSON(STORAGE_KEY_PENDING_QUEUE, q);
+        else localStorage.removeItem(STORAGE_KEY_PENDING_QUEUE);
+        return removed;
+    }
+    function clearPendingQueue() { localStorage.removeItem(STORAGE_KEY_PENDING_QUEUE); }
+
     function onMessageSent() {
         const now = Date.now();
-        const existing = getPendingRequest();
-        if (existing && now - existing.ts < 3000) return;
-
         const before = numberOrNull(localStorage.getItem(STORAGE_KEY_SPEND_CENTS));
-        const req = { ts: now, before: before, recorded: false };
-        setPendingRequest(req);
-
+        if (before === null) {  }
         if (!getSessionStart()) setSessionStart(now);
 
-        addRequest(now, 0.01);
-        req.recorded = true;
-        setPendingRequest(req);
-        console.log('[MammouthWidget] Message envoyé — requête enregistrée (avant:', before, '¢). En attente du coût réel via currentUsage.');
+        addRequest(now, 0.01, { measured: false });
+        pushPending({ ts: now, before, tries: 0, deadline: now + 180000 });
+        console.log('[MammouthWidget] Message envoyé — requête enregistrée (base ' + fmtCentsFr(before || 0)
+            + '). ' + getPendingQueue().length + ' mesure(s) en attente.');
 
         celebrate();
-        updateUI();
+        updateUI(true);
+        setTimeout(() => resolveOnePending(), 8000);
+    }
 
-        setTimeout(() => {
-            const p = getPendingRequest();
-            if (p && p.ts === now) {
-                readCurrentUsage().then(after => {
-                    if (after === null) return;
-                    localStorage.setItem(STORAGE_KEY_SPEND_CENTS, String(after));
-                    const base = p.before !== null ? p.before : before;
-                    if (base !== null) {
-                        const cost = after - base;
-                        if (cost > 0) {
-                            updateRequestCost(now, cost);
-                            console.log(`[MammouthWidget] Coût réel mesuré: ${cost.toFixed(2)}¢ (was 0.01¢)`);
-                        }
-                    }
-                    clearPendingRequest();
-                    updateUI();
-                    updateConsumptionStats();
-                    fetchQuotaFromAPI(true);
-                }).catch(() => { clearPendingRequest(); });
+    let _resolving = false;
+    function resolveOnePending() {
+        if (_resolving) return;
+        const q = getPendingQueue();
+        if (!q.length) return;
+        const p = q[0];
+        if (Date.now() > (p.deadline || 0)) {
+            popPending(p.ts);
+            setTimeout(() => resolveOnePending(), 0);
+            return;
+        }
+        p.tries = (p.tries || 0) + 1;
+        if (p.tries > CFG.resolveMaxTries) {
+            console.log('[MammouthWidget] mesure abandonnée après ' + CFG.resolveMaxTries + ' tentatives — placeholder conservé (0,01¢)');
+            popPending(p.ts);
+            setTimeout(() => resolveOnePending(), 0);
+            return;
+        }
+        _resolving = true;
+        const guard = setTimeout(() => { _resolving = false; }, CFG.resolveTimeoutMs);
+        readCurrentUsage().then(after => {
+            clearTimeout(guard);
+            _resolving = false;
+            if (after === null) { setTimeout(() => resolveOnePending(), 6000); return; }
+            localStorage.setItem(STORAGE_KEY_SPEND_CENTS, String(after));
+            let measured = false;
+            if (p.before !== null && p.before !== undefined) {
+
+                const cost = Math.round((after - p.before) * 10000) / 10000;
+                if (cost > 0) {
+                    updateRequestCost(p.ts, cost);
+                    measured = true;
+                    console.log('[MammouthWidget] Coût réel mesuré: ' + fmtCentsFr(cost) + ' (placeholder 0,01¢)');
+                } else if (cost < 0) {
+                    console.warn('[MammouthWidget] Coût négatif ignoré: ' + fmtCentsFr(cost));
+                }
             }
-        }, 8000);
+            if (!measured && p.tries < CFG.resolveMaxTries) {
+                setJSON(STORAGE_KEY_PENDING_QUEUE, getPendingQueue());
+                setTimeout(() => resolveOnePending(), 4000);
+                return;
+            }
+            popPending(p.ts);
+            updateUI(true);
+            updateConsumptionStats();
+            if (measured) { fetchQuotaFromAPI(true); scheduleAutoModelRefresh('coût mesuré'); }
+            if (getPendingQueue().length) setTimeout(() => resolveOnePending(), 800);
+        }).catch(() => { clearTimeout(guard); _resolving = false; setTimeout(() => resolveOnePending(), 6000); });
+    }
 
-        setTimeout(() => {
-            const p = getPendingRequest();
-            if (p && p.ts === now) clearPendingRequest();
-        }, 180000);
+    let _autoModelTimer = null;
+    function scheduleAutoModelRefresh(why) {
+        if (!modelAutoEnabled()) return;
+        if (inHarvestPopup() || _popupHarvest || _harvestInFlight) return;
+        if (Date.now() - _lastUserGestureTs > 45000) return;
+        const env = readModelEnvelope();
+        if (!Object.keys(env.models).length) return;
+
+        if (!modelStale() && Date.now() - (env.ts || 0) < CFG.modelAutoStaleMs) return;
+        if (Date.now() - _lastPopupHarvestTs < CFG.modelAutoMinGapMs) return;
+        if (_autoModelTimer) clearTimeout(_autoModelTimer);
+        _autoModelTimer = setTimeout(() => {
+            _autoModelTimer = null;
+            if (modelStale()) {
+                console.log('[MammouthWidget] quotas par modèle : mise à jour automatique (' + why + ')');
+                harvestViaPopupWindow('auto');
+            }
+        }, CFG.modelAutoDelayMs);
     }
 
     function findRecentPlaceholderRequest(maxAgeMs) {
@@ -2254,134 +3454,74 @@ const nFound = mergeScan();
         const now = Date.now();
         if (now - doneDebounce < 1500) return;
         doneDebounce = now;
-        console.log('[MammouthWidget] Fin de génération détectée → lecture currentUsage');
 
-        readCurrentUsage().then(after => {
-            if (after === null) return;
-            const prev = numberOrNull(localStorage.getItem(STORAGE_KEY_SPEND_CENTS));
-            localStorage.setItem(STORAGE_KEY_SPEND_CENTS, String(after));
-
-            let pending = getPendingRequest();
-            if (!pending) {
-                const ph = findRecentPlaceholderRequest(180000);
-                if (ph) {
-                    pending = { ts: ph.ts, before: prev, recorded: true, retries: 0 };
-                    console.log('[MammouthWidget] Requête placeholder récente trouvée — correction du coût.');
-                } else {
-                    return;
-                }
-            }
-
-            const base = pending.before !== null ? pending.before : prev;
-            if (base === null) {
-                console.log('[MammouthWidget] Pas de référence — baseline enregistrée.');
-                const p = getPendingRequest();
-                if (!p || p.recorded) {
-                    return;
-                }
-                addRequest(p.ts, 0.01);
-                p.recorded = true;
-                setPendingRequest(p);
-                updateUI();
-                return;
-            }
-
-            const cost = after - base;
-            const threshold = getThresholdCents();
-            const minMeaningfulCost = 0.02;
-            const maxRetries = 3;
-
-            if (cost < 0) {
-                console.warn('[MammouthWidget] Coût négatif ignoré:', cost.toFixed(2), '¢');
-                return;
-            }
-
-            if (cost > 0 && cost < threshold && threshold > 0) {
-                console.log(`[MammouthWidget] Micro-requête ignorée: ${cost.toFixed(2)}¢ < ${threshold.toFixed(1)}¢`);
-                return;
-            }
-
-            if (cost < minMeaningfulCost) {
-                const retries = (pending.retries || 0) + 1;
-                if (retries >= maxRetries) {
-                    console.log(`[MammouthWidget] Max retries atteint, on enregistre 0.01¢`);
-                    const finalCost = 0.01;
-                    const p = getPendingRequest();
-                    if (p && p.recorded) {
-                        updateRequestCost(p.ts, finalCost);
-                    } else if (p && !p.recorded) {
-                        addRequest(p.ts, finalCost);
-                        p.recorded = true;
-                        setPendingRequest(p);
-                    } else {
-                        updateRequestCost(pending.ts, finalCost);
-                    }
-                    celebrate();
-                    updateUI();
-                    fetchQuotaFromAPI(true);
-                    return;
-                }
-                pending.retries = retries;
-                setPendingRequest(pending);
-                console.log(`[MammouthWidget] Coût trop faible (${cost.toFixed(2)}¢), tentative ${retries}/${maxRetries} dans 3s...`);
-                setTimeout(() => { try { onGenerationDone(); } catch {} }, 3000);
-                return;
-            }
-
-            const p = getPendingRequest();
-            if (p && p.recorded) {
-                updateRequestCost(p.ts, cost);
-                console.log(`[MammouthWidget] Coût corrigé: ${cost.toFixed(2)}¢ (was 0.01¢)`);
-            } else if (p && !p.recorded) {
-                addRequest(p.ts, cost);
-                p.recorded = true;
-                setPendingRequest(p);
-                console.log(`[MammouthWidget] Requête enregistrée: ${cost.toFixed(2)}¢`);
+        if (!getPendingQueue().length) {
+            const ph = findRecentPlaceholderRequest(180000);
+            if (ph) {
+                pushPending({ ts: ph.ts, before: numberOrNull(localStorage.getItem(STORAGE_KEY_SPEND_CENTS)), tries: 0, deadline: now + 30000 });
+                console.log('[MammouthWidget] placeholder récente reprise — mesure du coût réel.');
             } else {
-                updateRequestCost(pending.ts, cost);
-                console.log(`[MammouthWidget] Coût placeholder corrigé: ${cost.toFixed(2)}¢`);
+                return;
             }
-            celebrate();
-            updateUI();
-            fetchQuotaFromAPI(true);
-        });
+        }
+        resolveOnePending();
     }
 
-    /* ================= DÉTECTION D'ENVOI (DOM, fiable) ================= */
-    document.addEventListener('keydown', function (e) {
-        const target = e.target;
-        const isInputField = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
-        if (isInputField && e.key === 'Enter' && !e.shiftKey) {
-            setTimeout(() => {
-                const isEmpty = (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') ? target.value.trim() === '' : target.innerText.trim() === '';
-                if (isEmpty) {
-                    try { onMessageSent(); } catch (err) {}
-                }
-            }, 300);
+    // Détection d'envoi
+    function looksLikeComposer(el) {
+        if (!el) return false;
+        if (el.closest('#mammouth-widget, #mw-sidebar, #mw-popover')) return false;
+        if (el.isContentEditable) return true;
+        if (el.tagName !== 'TEXTAREA' && el.tagName !== 'INPUT') return false;
+
+        if (el.tagName === 'INPUT') {
+            const ty = (el.type || 'text').toLowerCase();
+            if (!['text', 'search', 'email', 'url', ''].includes(ty)) return false;
         }
-    });
+
+        const form = el.form || el.closest('form');
+        if (!form) return el.tagName === 'TEXTAREA' || !!el.getAttribute('data-slot');
+        if (form.querySelector('select, input[type="checkbox"], input[type="radio"]')) return false;
+        const hasSend = [...form.querySelectorAll('button,[role="button"]')].some(b => {
+            const n = ((b.getAttribute('aria-label') || '') + ' ' + (b.getAttribute('title') || '') + ' ' + (b.innerText || '')).toLowerCase();
+            return /\b(envoyer|send|submit|publier)\b/.test(n) || b.getAttribute('type') === 'submit';
+        });
+        return hasSend;
+    }
+    function onComposerEnter(e) {
+        const target = e.target;
+        if (e.key !== 'Enter' || e.shiftKey || e.isComposing) return;
+        if (!looksLikeComposer(target)) return;
+        setTimeout(() => {
+            const empty = (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')
+                ? target.value.trim() === '' : target.innerText.trim() === '';
+            if (empty) { try { onMessageSent(); } catch (err) {} }
+        }, 300);
+    }
+    document.addEventListener('keydown', onComposerEnter, true);
 
     document.addEventListener('submit', event => {
         const form = event.target;
-        if (form instanceof HTMLFormElement) {
-            setTimeout(() => { try { onMessageSent(); } catch (e) {} }, 100);
-        }
+        if (!(form instanceof HTMLFormElement)) return;
+        if (!looksLikeComposer(form.querySelector('textarea, input, [contenteditable]'))) return;
+        setTimeout(() => { try { onMessageSent(); } catch (e) {} }, 100);
     }, true);
 
     document.addEventListener('click', event => {
-        const button = event.target.closest('button');
-        if (!button || button.closest('#mammouth-widget')) return;
+        const button = event.target.closest('button, [role="button"]');
+        if (!button || button.closest('#mammouth-widget, #mw-sidebar, #mw-popover')) return;
         const accessibleName = [
-            button.getAttribute('aria-label'),
-            button.getAttribute('title'),
-            button.innerText
+            button.getAttribute('aria-label'), button.getAttribute('title'), button.innerText
         ].filter(Boolean).join(' ').toLowerCase();
-        if (/\b(envoyer|send|submit)\b/.test(accessibleName) || button.getAttribute('type') === 'submit') {
-            setTimeout(() => { try { onMessageSent(); } catch (e) {} }, 150);
-        }
+        const isSend = /\b(envoyer|send|submit|publier)\b/.test(accessibleName);
+        if (!isSend) return;
+
+        const scope = button.form || button.closest('form') || button.parentElement;
+        if (!scope || !looksLikeComposer(scope.querySelector('textarea, input, [contenteditable]') || scope)) return;
+        setTimeout(() => { try { onMessageSent(); } catch (e) {} }, 150);
     }, true);
 
-    /* ================= INTERCEPTEUR RÉSEAU (coût réel, complémentaire) ================= */
+    // Intercepteur réseau
     window.fetch = function (...args) {
         const p = _origFetch.apply(window, args);
         let url = '';
@@ -2411,9 +3551,9 @@ const nFound = mergeScan();
         return _origSend.apply(this, args);
     };
 
-    /* ================= HISTORIQUE 7 JOURS ================= */
+    // Historique 7 jours
     function recordHistory() {
-        const pct = toPercent(localStorage.getItem(STORAGE_KEY_QUOTA));
+        const pct = toPercentStrict(localStorage.getItem(STORAGE_KEY_QUOTA));
         if (pct === null) return;
         let arr = readJSON(STORAGE_KEY_HISTORY, []);
         if (!Array.isArray(arr)) arr = [];
@@ -2434,7 +3574,10 @@ const nFound = mergeScan();
         const h = 52;
         canvas.width = w * dpr;
         canvas.height = h * dpr;
-        const ctx = canvas.getContext('2d');
+        let ctx = null;
+        try { ctx = canvas.getContext && canvas.getContext('2d'); } catch (e) { ctx = null; }
+
+        if (!ctx) return;
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.clearRect(0, 0, w, h);
 
@@ -2487,7 +3630,7 @@ const nFound = mergeScan();
         ctx.fill();
     }
 
-    /* ================= CARTE CONSOMMATION ================= */
+    // Carte consommation
     function updateConsumptionStats() {
         const reqs = getRequests();
         const totalCents = reqs.reduce((s, r) => s + (numberOrNull(r.cents) || 0), 0);
@@ -2497,12 +3640,30 @@ const nFound = mergeScan();
         const elAvg = document.getElementById('mw-stat-avg');
         const elSpend = document.getElementById('mw-stat-spend');
 
-        if (elWin) elWin.innerText = totalCents.toFixed(2) + '¢';
+        if (elWin) elWin.innerText = fmtCentsFr(totalCents);
         if (elCount) elCount.innerText = String(reqs.length);
-        if (elAvg) elAvg.innerText = reqs.length ? (totalCents / reqs.length).toFixed(2) + '¢' : '—';
+        if (elAvg) elAvg.innerText = reqs.length ? fmtCentsFr(totalCents / reqs.length) : '—';
         if (elSpend) {
             const s = numberOrNull(localStorage.getItem(STORAGE_KEY_SPEND_CENTS));
-            elSpend.innerText = s !== null ? s.toFixed(2) + '¢' : '—';
+            elSpend.innerText = s !== null ? fmtCentsFr(s) : '—';
+        }
+
+        const covWrap = document.getElementById('mw-stat-coverage-wrap');
+        const covVal = document.getElementById('mw-stat-coverage');
+        if (covWrap && covVal) {
+            const c = computeCoverage();
+            if (c.poolCents === null) {
+                covWrap.style.display = 'none';
+            } else {
+                covWrap.style.display = 'block';
+                const attribuee = Math.max(0, 100 - c.gapPct);
+                covWrap.className = 'mw-stat mw-stat-wide' + (c.cleared || attribuee < 90 ? ' warn' : '');
+                covVal.textContent = c.cleared
+                    ? 'registre effacé — la fenêtre ne peut plus être suivie requête par requête'
+                    : attribuee + ' % de ' + fmtCentsFr(c.poolCents) + ' attribués à une requête mesurée · '
+                        + fmtCentsFr(c.trackedCents) + ' suivis, ' + fmtCentsFr(c.gapCents)
+                        + ' envoyés ailleurs (autre onglet, autre appareil, avant installation)';
+            }
         }
         drawHistory();
     }
@@ -2525,6 +3686,10 @@ const nFound = mergeScan();
                     <div class="mw-stat"><div class="mw-stat-label">Requêtes</div><div class="mw-stat-value" id="mw-stat-count">—</div></div>
                     <div class="mw-stat"><div class="mw-stat-label">Moy./req</div><div class="mw-stat-value" id="mw-stat-avg">—</div></div>
                     <div class="mw-stat"><div class="mw-stat-label">Dépense API</div><div class="mw-stat-value" id="mw-stat-spend">—</div></div>
+                    <div class="mw-stat mw-stat-wide" id="mw-stat-coverage-wrap" style="display:none">
+                        <div class="mw-stat-label">Suivi de la fenêtre</div>
+                        <div class="mw-stat-value" id="mw-stat-coverage">—</div>
+                    </div>
                 </div>
             </div>
         `;
@@ -2544,7 +3709,7 @@ const nFound = mergeScan();
         };
     })();
 
-    /* ================= DRAG ================= */
+    // Drag
     (function setupDrag() {
         let dragging = false, moved = false, sx = 0, sy = 0, ox = 0, oy = 0;
 
@@ -2628,17 +3793,23 @@ const nFound = mergeScan();
         if (typeof _harvestInFlight !== 'undefined' && _harvestInFlight) return null;
         const g = (root === document || !root) ? readPoolGauge() : null;
         if (!g || !g.bar) return null;
+        maybeHarvestModelsFromModal();
         if (g.filtered) return g.round;
         if (g.round !== null && g.round > 0 && g.round < 100) {
             if (poolGuardActive()) return g.round;
             const chk = g.precise != null ? g.precise : g.round;
-            if (poolReadingImplausible(chk)) { logImplausiblePool(g.round); return g.round; }
+            if (poolReadingImplausible(chk)) {
+                logImplausiblePool(g.round);
+                localStorage.setItem(STORAGE_KEY_DOM_PERCENT, String(g.round));
+                localStorage.setItem(STORAGE_KEY_DOM_PCT_PRECISE, String(g.precise));
+                localStorage.setItem(STORAGE_KEY_DOM_PERCENT_TS, String(Date.now()));
+                return g.round;
+            }
             localStorage.setItem(STORAGE_KEY_DOM_PERCENT, String(g.round));
             localStorage.setItem(STORAGE_KEY_DOM_PCT_PRECISE, String(g.precise));
             localStorage.setItem(STORAGE_KEY_DOM_PERCENT_TS, String(Date.now()));
-            localStorage.setItem(STORAGE_KEY_QUOTA, String(g.round));
-            localStorage.setItem(STORAGE_KEY_CALIBRATE_PENDING, '1');
-            calibrateIfPending();
+
+            if (POOL.totalCents == null) CALIB.request('pool inconnu');
         }
         const models = [];
         const btns = g.bar.querySelectorAll('button[aria-label]');
@@ -2657,44 +3828,54 @@ const nFound = mergeScan();
         return g.round;
     }
 
+    const QUOTA_CLICK_ALLOW = /^(voir\s+(votre\s+|le\s+|la\s+)?quota|quota\s+par\s+mod[eè]le|quota|usage|utilisation|facturation|abonnement|plan)\b/;
+    let _autoClickBudget = 3;
     function autoClickQuotaButton() {
-        const labels = document.querySelectorAll('span[data-slot="label"]');
-        for (const lbl of labels) {
-            if (lbl.innerText && lbl.innerText.toLowerCase().includes('quota')) {
-                const clickable = lbl.closest('button') || lbl.closest('a') || lbl.parentElement;
-                if (clickable) { clickable.click(); return true; }
-            }
+        if (_autoClickBudget <= 0) return false;
+        const pathBefore = window.location.pathname;
+        const cands = [];
+        for (const el of document.querySelectorAll('button, [role="tab"], [role="switch"], [role="button"]')) {
+            if (el.closest('#mammouth-widget, #mw-sidebar, #mw-popover')) continue;
+            if (el.disabled || el.getAttribute('aria-disabled') === 'true') continue;
+            const t = String((el.innerText || el.textContent || '') + ' ' + (el.getAttribute('aria-label') || ''))
+                .replace(/\s+/g, ' ').trim().toLowerCase();
+            if (!t || t.length > 40) continue;
+            if (!QUOTA_CLICK_ALLOW.test(t)) continue;
+            cands.push({ el, t });
         }
-        const all = document.querySelectorAll('button, a');
-        for (const el of all) {
-            if (el.innerText && el.innerText.toLowerCase().includes('quota')) { el.click(); return true; }
+        cands.sort((a, b) => a.t.length - b.t.length);
+        for (const c of cands) {
+            try { c.el.click(); } catch { return false; }
+            _autoClickBudget--;
+            console.log('[MammouthWidget] auto-ouverture du panneau quota — clic sur « ' + c.t + ' » (budget restant ' + _autoClickBudget + ')');
+            if (window.location.pathname !== pathBefore) { window.history.back(); }
+            return true;
         }
         return false;
     }
+    function resetAutoClickBudget() { _autoClickBudget = 3; }
 
+    const SETTINGS_SCAN_MAX = 14;
+    let _settingsScan = null;
     function autoScanOnSettingsPage() {
         if (!window.location.pathname.includes('/app/account/settings')) return;
+        if (_settingsScan) return;
+        resetAutoClickBudget();
         let attempts = 0;
-        const maxAttempts = 25;
         const tryScan = () => {
             attempts++;
             const pct = readQuotaFromDOM(document);
             if (pct !== null) {
                 console.log('[MammouthWidget] Quota bar found on settings page:', pct + '%');
-                setTimeout(() => { harvestModelQuotasViaDom().then(() => {
-                    const popTs = parseInt(localStorage.getItem('mammouth_harvest_popup')||'0',10);
-                    if (popTs && Date.now() - popTs < 30000 && window.opener) {
-                        setTimeout(() => { try { window.close(); } catch {} }, 1200);
-                    }
-                }); fetchQuotaFromAPI(true); }, 400);
+                _settingsScan = null;
+                setTimeout(() => { harvestModelQuotasViaDom(); fetchQuotaFromAPI(true); }, 400);
                 return;
             }
             autoClickQuotaButton();
-            setTimeout(() => { readQuotaFromDOM(document); }, 500);
-            if (attempts < maxAttempts) setTimeout(tryScan, 800);
-            else console.warn('[MammouthWidget] Quota bar not found after', maxAttempts, 'attempts');
+            if (attempts < SETTINGS_SCAN_MAX) _settingsScan = setTimeout(tryScan, 800);
+            else { _settingsScan = null; console.warn('[MammouthWidget] Quota bar not found after', SETTINGS_SCAN_MAX, 'attempts'); }
         };
-        tryScan();
+        _settingsScan = setTimeout(tryScan, 0);
     }
 
     let observerCooldown = false;
@@ -2715,7 +3896,7 @@ const nFound = mergeScan();
         settingsObserverActive = false;
     }
 
-    /* ================= FONCTIONS HISTORIQUES RESTAURÉES ================= */
+    // Fonctions historiques
     function notificationsEnabled() { return localStorage.getItem(STORAGE_KEY_NOTIFY) !== 'off'; }
     function sendNotification(title, body) {
         if (!notificationsEnabled()) return;
@@ -2740,15 +3921,15 @@ const nFound = mergeScan();
 
     let timerEndNotifiedFor = null;
     function checkTimerNotification() {
+
         const reqs = getRequests();
         if (reqs.length === 0) { timerEndNotifiedFor = null; return; }
-        const oldestKey = reqs[0].ts;
-        const expired = reqs[0].ts + WINDOW_MS <= Date.now();
-        if (expired && timerEndNotifiedFor !== oldestKey) {
-            timerEndNotifiedFor = oldestKey;
+        const oldest = reqs[0];
+        const rel = oldest.ts + WINDOW_MS;
+        if (rel > Date.now()) { timerEndNotifiedFor = null; return; }
+        if (timerEndNotifiedFor !== oldest.ts) {
+            timerEndNotifiedFor = oldest.ts;
             sendNotification('Fenêtre Mammouth terminée', 'La fenêtre glissante de 3 heures est terminée.');
-        } else if (!expired && timerEndNotifiedFor === oldestKey) {
-            timerEndNotifiedFor = null;
         }
     }
 
@@ -2777,15 +3958,16 @@ const nFound = mergeScan();
             returnURL && window.location.pathname.includes('/app/account/settings') ? 'block' : 'none';
     }
 
-let lastTrackedURL = window.location.href;
+    let lastTrackedURL = window.location.href;
     function handleNavigationChange() {
+        if (window.closed) return;
         if (window.location.href === lastTrackedURL) return;
         lastTrackedURL = window.location.href;
         updateReturnButton();
         if (window.location.pathname.includes('/app/account/settings')) {
             startSettingsObserver();
             setTimeout(autoScanOnSettingsPage, 500);
-            localStorage.setItem(STORAGE_KEY_CALIBRATE_PENDING, '1');
+            CALIB.request('navigation → Réglages');
             setTimeout(() => fetchQuotaFromAPI(false), 3000);
         } else {
             stopSettingsObserver();
@@ -2819,22 +4001,30 @@ let lastTrackedURL = window.location.href;
             drawHistory();
         }
         checkTimerNotification();
-        recalibrateIfDivergent();
+
+        if (officialModelSectionSeen()) { scanDomForPercent(); maybeHarvestModelsFromModal(); }
+        CALIB.tick();
         updateReturnButton();
         handleNavigationChange();
     }
 
-    /* ================= EXPORT / IMPORT ================= */
+    // Export et import
     const EXPORT_KEYS = [
         STORAGE_KEY_START, STORAGE_KEY_POS, STORAGE_KEY_MIN, STORAGE_KEY_QUOTA, STORAGE_KEY_MODELS,
         STORAGE_KEY_API_TS, STORAGE_KEY_API_OK, STORAGE_KEY_API_ENABLED, STORAGE_KEY_DOM_PERCENT, STORAGE_KEY_DOM_PCT_PRECISE,
         STORAGE_KEY_DOM_PERCENT_TS, STORAGE_KEY_LAST_AUTOCAL,
-        STORAGE_KEY_RAW_USED, STORAGE_KEY_QUOTA_TOTAL, STORAGE_KEY_CALIBRATE_PENDING,
+        STORAGE_KEY_RAW_USED, STORAGE_KEY_QUOTA_TOTAL,
         STORAGE_KEY_LOGO_MODE,
         STORAGE_KEY_REQUESTS, STORAGE_KEY_SPEND_CENTS, STORAGE_KEY_THRESHOLD_CENTS,
         STORAGE_KEY_HISTORY, STORAGE_KEY_NOTIFY, STORAGE_KEY_NOTIFIED, STORAGE_KEY_MINI_MODE,
-        STORAGE_KEY_CIRCLE_MODE, STORAGE_KEY_UI_MODE, STORAGE_KEY_DAILY_MODEL, STORAGE_KEY_DAILY_BYMODEL, STORAGE_KEY_MODEL_PCT, STORAGE_KEY_MODEL_PCT_TS, STORAGE_KEY_MODEL_PCT_SEEN
+        STORAGE_KEY_CIRCLE_MODE, STORAGE_KEY_UI_MODE, STORAGE_KEY_DAILY_MODEL,
+        STORAGE_KEY_MODEL_QUOTA, STORAGE_KEY_MODEL_MISSES, STORAGE_KEY_SCHEMA,
+        STORAGE_KEY_LEDGER_CLEARED, STORAGE_KEY_CALIB_STATE, STORAGE_KEY_PLAN_REFUSED, STORAGE_KEY_MODEL_AUTO,
+        STORAGE_KEY_HARVEST_JOURNAL, STORAGE_KEY_RAW_USED_CACHE, STORAGE_KEY_RAW_USED_CACHE_TS,
+        STORAGE_KEY_SPEND_TS, STORAGE_KEY_LAST_CALIBRATION, STORAGE_KEY_POOL_GUARD,
+        STORAGE_KEY_POOL_GUARD_UNTIL, STORAGE_KEY_POOL_SOURCE, 'mammouth_consumption_collapsed'
     ];
+    const LEGACY_MODEL_KEYS = [STORAGE_KEY_MODEL_PCT, STORAGE_KEY_MODEL_PCT_SEEN, STORAGE_KEY_MODEL_PCT_TS, STORAGE_KEY_DAILY_BYMODEL];
 
     document.getElementById('mw-btn-minimize').onclick = e => {
         e.stopPropagation();
@@ -2852,24 +4042,27 @@ let lastTrackedURL = window.location.href;
     document.getElementById('mw-btn-start').onclick = () => {
         const now = Date.now();
         setSessionStart(now);
-        if (getRequests().length === 0) addRequest(now, 0.01);
+        if (getRequests().length === 0) addRequest(now, 0.01, { measured: false });
         celebrate();
-        updateUI();
+        updateUI(true);
         updateConsumptionStats();
     };
 
     document.getElementById('mw-btn-stop').onclick = () => {
         localStorage.removeItem(STORAGE_KEY_START);
         localStorage.removeItem(STORAGE_KEY_REQUESTS);
-        clearPendingRequest();
-        updateUI();
+        clearPendingRequests();
+
+        localStorage.setItem(STORAGE_KEY_LEDGER_CLEARED, String(Date.now()));
+        console.log('[MammouthWidget] registre effacé — les prochaines requêtes repartent de zéro');
+        updateUI(true);
         updateConsumptionStats();
     };
 
     quotaStatusEl.onclick = () => {
         const domPct = scanDomForPercent();
         if (domPct !== null) localStorage.setItem(STORAGE_KEY_DOM_PERCENT, String(domPct));
-        localStorage.setItem(STORAGE_KEY_CALIBRATE_PENDING, '1');
+        CALIB.request('clic Rafraîchir');
         fetchQuotaFromAPI(false);
         readCurrentUsage().then(c => {
             if (c !== null) {
@@ -2884,7 +4077,7 @@ let lastTrackedURL = window.location.href;
         window.__mwResetPos();
     };
 
-    /* ================= BOUTONS ================= */
+    // Boutons
     function syncApiToggle() {
         apiToggleBtn.innerText = apiEnabled() ? 'Activé' : 'Désactivé';
         apiToggleBtn.style.color = apiEnabled() ? '#2ed573' : '#ff6b6b';
@@ -2899,7 +4092,7 @@ let lastTrackedURL = window.location.href;
 
     function syncThresholdDisplay() {
         const d = document.getElementById('mw-threshold-display');
-        if (d) d.innerText = getThresholdCents().toFixed(1) + '¢';
+        if (d) d.innerText = getThresholdCents().toFixed(1).replace('.', ',') + '¢';
     }
     document.getElementById('mw-btn-threshold-dec').onclick = e => {
         e.stopPropagation();
@@ -2915,10 +4108,11 @@ let lastTrackedURL = window.location.href;
 
     document.getElementById('mw-btn-simulate').onclick = e => {
         e.stopPropagation();
-        addRequest(Date.now(), Math.max(getThresholdCents(), 5));
+
+        addRequest(Date.now(), Math.max(getThresholdCents(), 5), { sandbox: true, measured: false });
         if (!getSessionStart()) setSessionStart(Date.now());
         celebrate();
-        updateUI();
+        updateUI(true);
         updateConsumptionStats();
     };
 
@@ -2983,11 +4177,6 @@ let lastTrackedURL = window.location.href;
         updateUI();
         settingsPanel.classList.add('open');
     };
-    const dailySel = document.getElementById('mw-pop-model-select');
-    if (dailySel) {
-        dailySel.onclick = (e) => e.stopPropagation();
-        dailySel.onchange = () => { setDailyModel(dailySel.value); updateSidebar(); };
-    }
     const logoToggleBtn = document.getElementById('mw-logo-toggle');
     if (logoToggleBtn) {
         logoToggleBtn.onclick = (e) => {
@@ -3003,16 +4192,41 @@ let lastTrackedURL = window.location.href;
         e.stopPropagation();
         const domPct = scanDomForPercent();
         if (domPct !== null) localStorage.setItem(STORAGE_KEY_DOM_PERCENT, String(domPct));
-        localStorage.setItem(STORAGE_KEY_CALIBRATE_PENDING, '1');
+        CALIB.request('bouton Rafraîchir');
         if (window.location.pathname.includes('/app/account/settings')) harvestModelQuotasViaDom();
         else backgroundHarvestIfNeeded(true);
         fetchQuotaFromAPI(false);
         readCurrentUsage().then(c => { if (c !== null) { localStorage.setItem(STORAGE_KEY_SPEND_CENTS, String(c)); updateConsumptionStats(); } });
     };
+
+    function fetchModelsBtnClick(e) {
+        if (e) e.stopPropagation();
+
+        let tries = 0;
+        const attemptOpen = () => {
+            if (_popupHarvest) return;
+            if (harvestViaPopupWindow('manual')) return;
+            if (tries < 8 && (_bgHarvestInFlight || _harvestInFlight)) { tries++; setTimeout(attemptOpen, 900); return; }
+            console.log('[MammouthWidget] ouverture impossible pour l\'instant — Réglages → Quota fonctionne aussi (lecture automatique)');
+        };
+        attemptOpen();
+    }
+    document.getElementById('mw-pop-fetch-models').onclick = fetchModelsBtnClick;
+    const wFetchBtn = document.getElementById('mw-widget-fetch-models');
+    if (wFetchBtn) wFetchBtn.onclick = fetchModelsBtnClick;
     document.addEventListener('click', (e) => {
         if (getUiMode() !== 'sidebar') return;
         if (!sidebar.contains(e.target) && !popover.contains(e.target)) { popoverPinned = false; popover.classList.remove('open'); }
     });
+
+    function syncModelAutoButton() {
+        const b = document.getElementById('mw-btn-model-auto');
+        if (!b) return;
+        b.innerText = modelAutoEnabled() ? 'Auto' : 'Manuel';
+        b.style.color = modelAutoEnabled() ? '#2ed573' : '#ffa502';
+    }
+    const modelAutoBtn = document.getElementById('mw-btn-model-auto');
+    if (modelAutoBtn) modelAutoBtn.onclick = (e) => { e.stopPropagation(); setModelAuto(!modelAutoEnabled()); };
 
     document.getElementById('mw-btn-notifications').onclick = async (e) => {
         e.stopPropagation();
@@ -3029,25 +4243,28 @@ let lastTrackedURL = window.location.href;
 
     document.getElementById('mw-btn-calibrate').onclick = (e) => {
         e.stopPropagation();
-        if (window.location.pathname.includes('/app/account/settings')) {
-            localStorage.setItem(STORAGE_KEY_CALIBRATE_PENDING, '1');
-            autoScanOnSettingsPage();
-            return;
-        }
+
+        CALIB.request('bouton Calibrer');
         localStorage.setItem(STORAGE_KEY_RETURN_URL, window.location.href);
-        localStorage.setItem(STORAGE_KEY_CALIBRATE_PENDING, '1');
-        window.location.href = `${window.location.origin}/app/account/settings`;
+        noteUserGesture();
+        if (!harvestViaPopupWindow('manual')) {
+            if (window.location.pathname.includes('/app/account/settings')) autoScanOnSettingsPage();
+            else            console.log('[MammouthWidget] petite fenêtre bloquée — ouvre manuellement /app/account/settings/subscription puis clique Rafraîchir');
+        }
     };
 
     document.getElementById('mw-btn-clear-requests').onclick = (e) => {
         e.stopPropagation();
         if (confirm('Effacer la fenêtre glissante (requêtes) et l\'historique de quota ?')) {
+
             localStorage.removeItem(STORAGE_KEY_REQUESTS);
             localStorage.removeItem(STORAGE_KEY_START);
             localStorage.removeItem(STORAGE_KEY_HISTORY);
             localStorage.removeItem(STORAGE_KEY_NOTIFIED);
-            pendingRequest = null;
-            updateUI();
+            clearPendingRequests();
+            localStorage.setItem(STORAGE_KEY_LEDGER_CLEARED, String(Date.now()));
+            console.log('[MammouthWidget] fenêtre + historique effacés');
+            updateUI(true);
             updateConsumptionStats();
             drawHistory();
         }
@@ -3059,7 +4276,8 @@ let lastTrackedURL = window.location.href;
 
     exportBtn.onclick = (e) => {
         e.stopPropagation();
-        const data = { version: 14, exportedAt: new Date().toISOString(), values: {} };
+
+        const data = { schema: SCHEMA_VERSION, version: 14, exportedAt: new Date().toISOString(), values: {}, models: readModelEnvelope() };
         for (const key of EXPORT_KEYS) {
             const value = localStorage.getItem(key);
             if (value !== null) data.values[key] = value;
@@ -3075,25 +4293,67 @@ let lastTrackedURL = window.location.href;
 
     importBtn.onclick = (e) => { e.stopPropagation(); importFile.click(); };
 
+    const IMPORT_RULES = {
+        [STORAGE_KEY_QUOTA_TOTAL]: (v) => { const n = numberOrNull(v); return n != null && n > 0 && n < 1000000 ? n : null; },
+        [STORAGE_KEY_QUOTA]: (v) => { const n = numberOrNull(v); return n != null && n >= 0 && n <= 100 ? n : null; },
+        [STORAGE_KEY_RAW_USED]: (v) => { const n = numberOrNull(v); return n != null && n >= 0 ? n : null; },
+        [STORAGE_KEY_RAW_USED_CACHE]: (v) => { const n = numberOrNull(v); return n != null && n >= 0 ? n : null; },
+        [STORAGE_KEY_SPEND_CENTS]: (v) => { const n = numberOrNull(v); return n != null && n >= 0 ? n : null; },
+        [STORAGE_KEY_THRESHOLD_CENTS]: (v) => { const n = numberOrNull(v); return n != null && n >= 0 && n < 100000 ? n : null; },
+        [STORAGE_KEY_MINI_MODE]: (v) => (['used', 'remaining', 'time'].includes(v) ? v : null),
+        [STORAGE_KEY_CIRCLE_MODE]: (v) => (['used', 'remaining', 'time'].includes(v) ? v : null),
+        [STORAGE_KEY_UI_MODE]: (v) => (['classic', 'sidebar'].includes(v) ? v : null),
+        [STORAGE_KEY_LOGO_MODE]: (v) => (v === '0' || v === '1' ? v : null),
+        [STORAGE_KEY_MIN]: (v) => (v === '0' || v === '1' ? v : null),
+        [STORAGE_KEY_API_ENABLED]: (v) => (v === 'on' || v === 'off' ? v : null),
+        [STORAGE_KEY_NOTIFY]: (v) => (v === 'on' || v === 'off' ? v : null),
+        [STORAGE_KEY_API_OK]: (v) => (v === '0' || v === '1' ? v : null),
+    };
+    function validateImport(values) {
+        const out = {}, rejected = [];
+        for (const key of EXPORT_KEYS) {
+            if (typeof values[key] !== 'string') continue;
+            const rule = IMPORT_RULES[key];
+            if (rule) {
+                const v = rule(values[key]);
+                if (v === null) { rejected.push(key + '=' + values[key]); continue; }
+                out[key] = String(v);
+            } else if (/^-?\d{1,15}$/.test(values[key]) || /^[a-z0-9_:,\-\.·% ]{0,4000}$/i.test(values[key])) {
+                out[key] = values[key];
+            } else rejected.push(key);
+        }
+        return { out, rejected };
+    }
+
     importFile.onchange = async () => {
         const file = importFile.files && importFile.files[0];
         if (!file) return;
         try {
             const parsed = JSON.parse(await file.text());
             if (!parsed.values || typeof parsed.values !== 'object') throw new Error('Format incorrect');
-            for (const key of EXPORT_KEYS) {
-                if (typeof parsed.values[key] === 'string') localStorage.setItem(key, parsed.values[key]);
-            }
-            updateUI();
+            const { out, rejected } = validateImport(parsed.values);
+            if (rejected.length) console.warn('[MammouthWidget] import : ' + rejected.length + ' valeur(s) rejetée(s) →', rejected);
+            let skippedModels = false;
+            if (parsed.models && typeof parsed.models === 'object') {
+                const m = normalizeModelMap(parsed.models.models || parsed.models);
+                if (Object.keys(m).length) storeModelPct(m, 'import', { complete: false, confidence: 0.5 });
+                else skippedModels = true;
+            } else skippedModels = true;
+            for (const key of Object.keys(out)) localStorage.setItem(key, out[key]);
+            localStorage.setItem(STORAGE_KEY_SCHEMA, String(SCHEMA_VERSION));
+            updateUI(true);
             updateConsumptionStats();
             drawHistory();
             syncNotificationButton();
+            syncModelAutoButton();
             syncApiToggle();
             syncMiniModeButton();
             syncCircleModeButton();
             syncUiModeButton();
             updateReturnButton();
-            alert('Données Mammouth importées.');
+            alert('Données Mammouth importées.'
+                + (rejected.length ? '\n\n' + rejected.length + ' valeur(s) rejetée(s) (voir console).' : '')
+                + (skippedModels ? '\n\nAucun quota par modèle dans le fichier.' : ''));
         } catch (error) {
             console.error('[MammouthWidget] Import:', error);
             alert('Impossible d\'importer ce fichier.');
@@ -3102,26 +4362,29 @@ let lastTrackedURL = window.location.href;
         }
     };
 
+    const STORAGE_NO_REDRAW = new Set([STORAGE_KEY_HARVEST_JOURNAL, STORAGE_KEY_SOURCE_LOG,
+        STORAGE_KEY_POOL_GUARD, STORAGE_KEY_POOL_GUARD_UNTIL, STORAGE_KEY_API_TS,
+        STORAGE_KEY_RAW_USED_CACHE, STORAGE_KEY_RAW_USED_CACHE_TS, STORAGE_KEY_SPEND_TS]);
     window.addEventListener('storage', (event) => {
-        if (event.key === STORAGE_KEY_MODEL_PCT && event.newValue !== event.oldValue) {
+        if (event.key === STORAGE_KEY_MODEL_QUOTA && event.newValue !== event.oldValue) {
             try {
-                const nw = JSON.parse(event.newValue || '{}');
-                const od = JSON.parse(event.oldValue || '{}');
-                const fmt = (m) => displayableModelNames(m).map(n => n + ' ' + m[n] + '%').join(', ') || '(vide)';
-                console.log('[MammouthWidget] modèles mis à jour par une autre fenêtre →', fmt(nw), '| avant:', fmt(od));
-                const jr = readJSON(STORAGE_KEY_HARVEST_JOURNAL, []);
-                if (jr.length) console.log('[MammouthWidget] journal harvest →', JSON.stringify(jr[jr.length - 1]));
+                const nw = readJSON(STORAGE_KEY_MODEL_QUOTA, {});
+                const fmt = (m) => Object.keys(m.models || {}).filter(isDisplayableModelKey)
+                    .map(n => n + ' ' + m.models[n].pct + '%').join(', ') || '(vide)';
+                console.log('[MammouthWidget] quotas par modèle mis à jour par une autre fenêtre →', fmt(nw), '| source:', nw.source);
             } catch {}
         }
         if (!event.key || event.key.startsWith('mammouth_')) {
-            updateUI();
+            if (event.key && STORAGE_NO_REDRAW.has(event.key)) return;
+            updateUI(true);
             updateConsumptionStats();
             syncNotificationButton();
+            syncModelAutoButton();
             syncApiToggle();
             syncMiniModeButton();
             syncCircleModeButton();
             syncUiModeButton();
-syncLogoToggle();
+            syncLogoToggle();
             updateReturnButton();
         }
     });
@@ -3137,38 +4400,73 @@ syncLogoToggle();
     });
 
     syncNotificationButton();
+    syncModelAutoButton();
     syncMiniModeButton();
     syncCircleModeButton();
     syncUiModeButton();
     applyUiMode();
     updateReturnButton();
 
-    updateUI();
+    updateUI(true);
     updateConsumptionStats();
+    updateSyncIndicator();
+    scheduleAutoModelRefresh('démarrage');
 
-    try {
-        const curPct = readJSON(STORAGE_KEY_MODEL_PCT, {});
-        const cleanedPct = {};
-        for (const [k, v] of Object.entries(curPct)) if (!isJunkModelKey(k) && Number.isFinite(v)) cleanedPct[k] = v;
-        if (Object.keys(cleanedPct).length !== Object.keys(curPct).length) {
-            localStorage.setItem(STORAGE_KEY_MODEL_PCT, JSON.stringify(cleanedPct));
-            console.log('[MammouthWidget] purge clés non-modèle du stockage par modèle →', Object.keys(cleanedPct));
+    // Migration v14 vers v15
+    function migrateSchema() {
+        const cur = numberOrNull(localStorage.getItem(STORAGE_KEY_SCHEMA)) || 0;
+        if (cur >= SCHEMA_VERSION) return false;
+        const report = [];
+        const legacy = readJSON(STORAGE_KEY_MODEL_PCT, {});
+        const seen = readJSON(STORAGE_KEY_MODEL_PCT_SEEN, {});
+        const legacyNames = Object.keys(legacy).filter(k => isDisplayableModelKey(k) && pctOf(legacy[k]) !== null);
+        if (legacyNames.length && !Object.keys(readModelEnvelope().models).length) {
+            const flat = {};
+            for (const k of legacyNames) flat[k] = pctOf(legacy[k]);
+            storeModelPct(flat, 'migration', { complete: false, confidence: 0.4 });
+            report.push('modèles migrés : ' + legacyNames.length);
         }
-    } catch {}
 
-    _origFetch(CURRENT_USAGE_URL, { credentials: 'include', cache: 'no-store' })
-        .then(r => r.ok ? r.json() : null)
-        .then(d => {
-            const c = numberOrNull(d && d.currentSpendCents);
-            if (c !== null) {
-                localStorage.setItem(STORAGE_KEY_SPEND_CENTS, String(c));
-                console.log('[MammouthWidget] Baseline currentSpendCents =', c);
-                updateConsumptionStats();
-            }
-        })
-        .catch(() => {});
+        const raw = (() => { try { const a = JSON.parse(localStorage.getItem(STORAGE_KEY_REQUESTS) || '[]'); return Array.isArray(a) ? a : []; } catch { return []; } })();
+        const virt = raw.filter(r => r && r.virt).length;
+        if (virt) {
+            const kept = raw.filter(r => r && !r.virt).map(r => {
+                const o = { ts: r.ts, cents: numberOrNull(r.cents) || 0.01 };
+                o.measured = r.measured !== false && o.cents > 0.01;
+                if (r.sandbox) o.sandbox = true;
+                return o;
+            });
+            if (kept.length) localStorage.setItem(STORAGE_KEY_REQUESTS, JSON.stringify(kept));
+            else localStorage.removeItem(STORAGE_KEY_REQUESTS);
+            report.push('requêtes virtuelles supprimées : ' + virt);
+        }
 
-    setTimeout(() => {
+        if (localStorage.getItem(STORAGE_KEY_QUOTA_TOTAL) !== null) {
+            localStorage.removeItem(STORAGE_KEY_QUOTA_TOTAL);
+            report.push('total du pool remis à zéro (recalibration propre)');
+        }
+        localStorage.removeItem(STORAGE_KEY_CALIBRATE_PENDING);
+        localStorage.removeItem(STORAGE_KEY_LAST_AUTOCAL);
+
+        for (const k of LEGACY_MODEL_KEYS) localStorage.removeItem(k);
+        localStorage.setItem(STORAGE_KEY_SCHEMA, String(SCHEMA_VERSION));
+        console.log('[MammouthWidget] migration v14 → v15 :', report.length ? report.join(' · ') : 'rien à migrer');
+        return true;
+    }
+    migrateSchema();
+
+    const PASSIVE = inHarvestPopup();
+
+    if (!PASSIVE) readCurrentUsage().then(c => {
+        if (c !== null) {
+            localStorage.setItem(STORAGE_KEY_SPEND_CENTS, String(c));
+            console.log('[MammouthWidget] Dépense site courante =', fmtCentsFr(c));
+            updateConsumptionStats();
+        }
+        if (POOL.totalCents == null) CALIB.request('démarrage');
+    });
+
+    if (!PASSIVE) setTimeout(() => {
         const isSettingsPage = window.location.pathname.includes('/app/account/settings');
         if (!isSettingsPage) {
             const d = scanDomForPercent();
@@ -3176,46 +4474,277 @@ syncLogoToggle();
             fetchQuotaFromAPI(true);
             setTimeout(() => backgroundHarvestIfNeeded(), 6000);
         } else {
-            localStorage.setItem(STORAGE_KEY_CALIBRATE_PENDING, '1');
+            CALIB.request('page Réglages');
             autoScanOnSettingsPage();
             setTimeout(() => fetchQuotaFromAPI(true), 2500);
         }
     }, 2500);
 
-    /* ================= BOUCLES ================= */
-    if (!window.__mwTimersStarted) {
-        window.__mwTimersStarted = true;
-        window.__mwTickTimer = setInterval(updateUI, 1000);
-        window.__mwApiTimer = setInterval(() => { if (apiEnabled()) { fetchQuotaFromAPI(true); if (window.location.pathname.includes('/app/account/settings')) harvestModelQuotasViaDom(); else backgroundHarvestIfNeeded(); } }, API_INTERVAL_MS);
-        window.__mwConsTimer = setInterval(updateConsumptionStats, 15000);
-        window.addEventListener('beforeunload', () => {
-            clearInterval(window.__mwTickTimer);
-            clearInterval(window.__mwApiTimer);
-            clearInterval(window.__mwConsTimer);
-        });
-    }
+    // Boucles
+    window.__mwTimers = window.__mwTimers || [];
+    window.__mwTimers.push(setInterval(() => updateUI(false), CFG.lightTickMs));
+    if (!PASSIVE) {
+        window.__mwTimers.push(setInterval(() => {
+            if (apiEnabled()) {
+                fetchQuotaFromAPI(true);
+                if (window.location.pathname.includes('/app/account/settings')) harvestModelQuotasViaDom();
+                else backgroundHarvestIfNeeded();
+            }
+        }, API_INTERVAL_MS));
+        window.__mwTimers.push(setInterval(() => {
+            if (document.hidden) return;
+            if (window.location.pathname.includes('/app/account/settings')) harvestModelQuotasViaDom();
+            else backgroundHarvestIfNeeded();
+        }, 3 * 60 * 1000));
+        window.__mwTimers.push(setInterval(() => {
+            if (document.hidden) extensionTick();
+            CALIB.tick();
+        }, 3000));
 
-    if (!window.__mwExtTimers) {
-        window.__mwExtTimers = true;
-        setInterval(() => { if (!document.hidden) { if (window.location.pathname.includes('/app/account/settings')) harvestModelQuotasViaDom(); else backgroundHarvestIfNeeded(); } }, 3 * 60 * 1000);
-        setInterval(() => { if (!document.hidden) extensionTick(); }, 3000);
-        setInterval(() => { if (document.hidden) extensionTick(); }, 30000);
+        window.__mwTimers.push(setInterval(() => {
+            if (document.hidden || !apiEnabled() || _popupHarvest) return;
+            POOL.setSyncing(true);
+            readCurrentUsage().then(c => { POOL.setSyncing(false); if (c !== null) updateUI(true); });
+        }, CFG.poolPollMs));
+    }
+    window.__mwTimers.push(setInterval(updateConsumptionStats, 15000));
+    window.addEventListener('beforeunload', () => {
+        for (const t of (window.__mwTimers || [])) clearInterval(t);
+        window.__mwTimers = [];
+    }, { once: true });
+
+    try {
+        document.addEventListener('pointerdown', noteUserGesture, true);
+        document.addEventListener('keydown', noteUserGesture, true);
+        document.addEventListener('wheel', noteUserGesture, { capture: true, passive: true });
+    } catch {}
+
+    window.addEventListener('message', (ev) => {
+        if (ev.origin !== window.location.origin) return;
+        const d = ev.data;
+        if (!d || d.type !== 'mw_harvest_result' || !window.opener) return;
+        const map = normalizeModelMap(d.models);
+        const names = displayableModelNames(map);
+        if (!names.length) { console.log('[MammouthWidget] popup : lecture vide, ignorée'); return; }
+        const complete = d.complete === true;
+        storeModelPct(map, 'popup', { complete, confidence: complete ? 0.95 : 0.5 });
+        journalHarvest({ ts: Date.now(), source: 'popup:message', action: complete ? 'scan complet' : 'scan partiel', avant: modelNames(), apres: names.map(n => n + '=' + map[n]) });
+        console.log('[MammouthWidget] quotas par modèle reçus de la petite fenêtre ('
+            + (complete ? 'complet' : 'partiel') + ') →',
+            names.map(n => n + ' ' + map[n] + '%').join(', '));
+        updateUI(true);
+    });
+
+    // Tests
+    function buildTestSuite() {
+        const cases = [];
+        const t = (name, fn) => cases.push({ name, fn });
+        const eq = (got, want, msg) => ({ ok: String(got) === String(want), got, want, msg });
+
+        t('toPercent ratio 0.43 → 43', () => eq(toPercent(0.43), 43));
+        t('toPercent ratio "0.43" → 43', () => eq(toPercent('0.43'), 43));
+        t('toPercent pct 43 → 43', () => eq(toPercent(43), 43));
+        t('toPercent "43%" → 43', () => eq(toPercent('43%'), 43));
+        t('toPercent "192%" → 192 (modèle bloqué)', () => eq(toPercent('192%'), 192));
+        t('toPercent 0 → 0 (pas un ratio)', () => eq(toPercent(0), 0));
+        t('toPercent null → null', () => eq(toPercent(null), 'null'));
+        t('toPercentStrict "0.5" → 1 (0,5 %, pas 50 %)', () => eq(toPercentStrict('0.5'), 1));
+        t('toPercentStrict "43" → 43', () => eq(toPercentStrict('43'), 43));
+
+        t('fmtPct(0) → "0 %"', () => eq(fmtPct(0), '0 %'));
+        t('fmtPct(null) → "—"', () => eq(fmtPct(null), '—'));
+        t('fmtPct(12.6) → "13 %"', () => eq(fmtPct(12.6), '13 %'));
+        t('fmtPct(43,"%") → "43%" (suffix serré)', () => eq(fmtPct(43, '%'), '43%'));
+        t('fmtPct(43) → "43 %"', () => eq(fmtPct(43), '43 %'));
+
+        t('fmtCentsFr(12.4) → "12,40¢"', () => eq(fmtCentsFr(12.4), '12,40¢'));
+        t('fmtCentsFr(0.005) → "0,01¢"', () => eq(fmtCentsFr(0.005), '0,01¢'));
+
+        t('displayable "3.1 70B" (visible)', () => eq(isDisplayableModelKey('3.1 70B'), true));
+        t('displayable "70B Turbo" (visible)', () => eq(isDisplayableModelKey('70B Turbo'), true));
+        t('displayable "o3" (visible)', () => eq(isDisplayableModelKey('o3'), true));
+        t('displayable "Quota par modèle" (rejeté)', () => eq(isDisplayableModelKey('Quota par modèle'), false));
+        t('displayable "Claude" marque pure (rejeté — part de marque, pas un modèle)', () => eq(isDisplayableModelKey('Claude'), false));
+        t('displayable "Cliquez pour filtrer" (rejeté)', () => eq(isDisplayableModelKey('Cliquez pour filtrer'), false));
+        t('displayable "" (rejeté)', () => eq(isDisplayableModelKey(''), false));
+
+        t('normalize: alias minuscule ÉLIMINÉ', () => eq(
+            Object.keys(normalizeModelMap({ 'Claude Sonnet 5': 31, 'grok 4': 12 })).includes('grok 4'), false));
+        t('normalize: 192 % conservé (bloqué)', () => eq(normalizeModelMap({ 'Claude Fable 5.1': 192 })['Claude Fable 5.1'], 192));
+        t('normalize: 1500 % rejeté', () => eq(Object.keys(normalizeModelMap({ 'X Y': 1500 })).length, 0));
+        t('normalize: nom beautifié', () => eq(Object.keys(normalizeModelMap({ 'claude-opus-4-1': 44 }))[0], 'Opus 4.1'));
+
+        t('score "k2" vs "Kimi K2" ≥ "Kimi K2.5"', () => eq(
+            scoreModelName('k2', 'Kimi K2') > scoreModelName('k2', 'Kimi K2.5'), true));
+        t('score "gpt-4o" soi-même = 100', () => eq(scoreModelName('gpt-4o', 'GPT 4O'), 100));
+        t('score sans rapport = 0', () => eq(scoreModelName('claude', 'GPT 5'), 0));
+
+        t('parse: byBrand en centimes accepté', () => eq(
+            parseQuotaResponse({ byBrand: [{ brand: 'claude', value: 194.18 }, { brand: 'grok', value: 12.5 }] }).rawUsedSum, 206.68));
+        t('parse: byBrand RATIO rejeté', () => eq(
+            parseQuotaResponse({ byBrand: [{ brand: 'claude', value: 0.43 }] }).rawUsedSum, 'null'));
+        t('parse: percent ratio 0.43 → 43', () => eq(parseQuotaResponse({ percent: 0.43 }).percent, 43));
+        t('parse: usedModels NON tronqué', () => eq(
+            (parseQuotaResponse({ usedModels: ['a1', 'a2', 'a3', 'a4', 'a5'] }).modelsList || []).length, 5));
+        t('parse: réponse nulle → ok:false', () => eq(parseQuotaResponse(null).ok, false));
+
+        t('pool: pct = used/total', () => eq(POOL.computePct(225, 450), 50));
+        t('pool: total 0 → null', () => eq(POOL.computePct(10, 0), 'null'));
+        t('pool: >100 plafonné à 100', () => eq(POOL.computePct(900, 450), 100));
+        t('pool: used 0 → 0 (pas « — »)', () => eq(POOL.computePct(0, 450), 0));
+
+        t('BUG CENTRAL: anneau 2 (temps) ≠ anneau 1 (spend) quand spend=0', () => {
+            const now = Date.now();
+            const reqs = [{ ts: now - 90 * 60 * 1000, cents: 0, measured: true }];
+            const elapsed = Math.round(((WINDOW_MS - (now - 90 * 60 * 1000 + WINDOW_MS - now)) / WINDOW_MS) * 100);
+            const poolPct = POOL.computePct(0, 450);
+            return eq(poolPct === elapsed, false, 'anneau1=' + poolPct + ' anneau2=' + elapsed + ' reqs=' + JSON.stringify(reqs));
+        });
+        t('BUG CENTRAL: simulateur exclut le sandbox', () => {
+            const now = Date.now();
+            const a = simProjection([{ ts: now - 60 * 60 * 1000, cents: 5 }], 3 * 3600 * 1000);
+            const b = simProjection([{ ts: now - 60 * 60 * 1000, cents: 5, sandbox: true }], 3 * 3600 * 1000);
+            return eq(b.recovered, 0, 'récupéré=' + b.recovered);
+        });
+
+        t('sim: agrégation ±500 ms', () => {
+            const t0 = Date.now() + 60000;
+            const p = simProjection([{ ts: t0 - WINDOW_MS, cents: 3 }, { ts: t0 - WINDOW_MS + 200, cents: 2 }], 0);
+            return eq(p.next && p.next.cents, 5);
+        });
+        t('sim: sandbox ignoré dans next', () => {
+            const t0 = Date.now() + 60000;
+            const p = simProjection([{ ts: t0 - WINDOW_MS, cents: 3, sandbox: true }], 0);
+            return eq(p.totalReqs, 0);
+        });
+
+        const rej = (v, k) => validateImport(v).rejected.some(r => r === k || r.startsWith(k + '='));
+        t('import: total aberrant rejeté', () => eq(rej({ mammouth_quota_total: 'abc' }, 'mammouth_quota_total'), true));
+        t('import: total plausible accepté', () => eq(
+            validateImport({ mammouth_quota_total: '450' }).out['mammouth_quota_total'], '450'));
+        t('import: ui_mode invalide rejeté', () => eq(rej({ mammouth_ui_mode: 'pirate' }, 'mammouth_ui_mode'), true));
+        t('import: ui_mode valide accepté', () => eq(
+            validateImport({ mammouth_ui_mode: 'sidebar' }).out['mammouth_ui_mode'], 'sidebar'));
+        t('import: pct hors bornes rejeté', () => eq(rej({ mammouth_real_quota_percent: '9999' }, 'mammouth_real_quota_percent'), true));
+        t('import: mode mini invalide refusé', () => eq(rej({ mammouth_mini_mode: 'pirate' }, 'mammouth_mini_mode'), true));
+        t('import: spend négatif refusé', () => eq(rej({ mammouth_current_spend_cents: '-5' }, 'mammouth_current_spend_cents'), true));
+
+        t('coverage: tracked=0, gap=pool', () => {
+            const c = computeCoverage();
+            return eq(c.gapCents === null || c.gapCents >= 0, true);
+        });
+
+        t('autoClick: budget initial = 3', () => { resetAutoClickBudget(); return eq(_autoClickBudget, 3); });
+
+        return {
+            cases,
+            run() {
+                let pass = 0, fail = 0;
+                const failures = [];
+                for (const c of cases) {
+                    let r;
+                    try { r = c.fn(); } catch (e) { r = { ok: false, got: 'throw: ' + e.message, want: '—' }; }
+                    if (r && r.ok) { pass++; }
+                    else {
+                        fail++;
+                        failures.push(c.name + ' → attendu ' + r.want + ', obtenu ' + r.got + (r.msg ? ' (' + r.msg + ')' : ''));
+                    }
+                }
+                console.log('%c[MammouthWidget] TESTS v15 — ' + pass + ' passés, ' + fail + ' échoués',
+                    'color:' + (fail ? '#ff4757;font-weight:700' : '#2ed573;font-weight:700'));
+                for (const f of failures) console.log('  ✗ ' + f);
+                return { pass, fail, failures };
+            },
+        };
     }
 
     window.__mwDebug = {
         classifyQuotaBars, readPoolGauge, scanModelSections, findModelNameForBar,
+        readSubscriptionQuotaSection,
         allGaugePreciseWidths, detectBrandFilterActive, scanDomForPercent,
-        recalibrateIfDivergent, isJunkModelKey, isPureBrandKey,
-        storeModelPct, normalizeModelMap, displayableModelNames,
-        officialModelSectionSeen,
+        CALIB, POOL, buildRings, coverage: computeCoverage, isJunkModelKey, isPureBrandKey,
+        storeModelPct, normalizeModelMap, displayableModelNames, modelPctMap, modelNames,
+        readModelEnvelope, modelStale, modelAgeLabel, scoreModelName, resolveDailyPct,
+        officialModelSectionSeen, maybeHarvestModelsFromModal,
         poolGuardActive, expectedPoolPct, poolReadingImplausible, notePoolActivity,
-        calibrateIfPending, readQuotaFromDOM, fetchQuotaFromAPI,
+        readQuotaFromDOM, fetchQuotaFromAPI, migrateSchema,
         renderModelBlocks, brandLogoSvg, syncLogoToggle, setLogoMode, getLogoMode,
-        updateSidebar, renderRing3Logo,
-        simProjection, updateSimulator, updatePopoverSimHint,
+        updateSidebar, renderRing3Logo, updateUI, updateModelsSubtitle, updateConsumptionStats, drawHistory,
+        simProjection, updateSimulator, fmtPct, fmtCentsFr,
+        toPercent, toPercentStrict, fmtDurMin, fmtHrMin, formatResetIn,
+        computeCoverage, coverageLabel, authoritativeWindowSpend, pruneRequests,
+        parseQuotaResponse, validateImport, IMPORT_RULES, CFG,
         harvestDom: () => harvestModelQuotasViaDom(),
         harvestJournal: () => readJSON(STORAGE_KEY_HARVEST_JOURNAL, []),
+        sourceLog: () => readJSON(STORAGE_KEY_SOURCE_LOG, null),
+        extensionTick, healTotalFromPlan, refusePlanPoolIfDivergent,
+        planPoolCents: PLAN_POOL_CENTS,
+        harvestViaPopupWindow, popupHarvestTick, finishPopupHarvest, restoreGlobalFilter,
+        closeTrackedPopupWindows, trackedPopups: () => _popupWindows.size,
+        findQuotaTriggerCandidates, assistPopupQuotaClick, autoClickQuotaButton,
+        noteUserGesture, inHarvestPopup, backgroundHarvestIfNeeded,
+        pendingQueue: getPendingQueue, resolveOnePending,
+        diagnoseQuotaDOM, brandFilterChips, clearPopupFilter, popupBanner, readPoolGaugeIn, gentleScrollPopup,
+        applyPopupRect, popupTargetRect,
+        scheduleAutoModelRefresh, poolFreshnessLabel, modelAutoEnabled, setModelAuto, POOL_POLL_MS,
+        modelEntries, modelEntryAgeLabel, readModelMisses, HISTORY_RETENTION_MS,
     };
+    // Diagnostic
+    function diagnoseQuotaDOM() {
+        const out = {
+            url: location.pathname,
+            officialModelSectionSeen: (() => { try { return officialModelSectionSeen(); } catch { return 'err'; } })(),
+            progressbars: [],
+            brandChips: [],
+            headings: [],
+            api: null,
+        };
+        for (const b of document.querySelectorAll('[role="progressbar"]')) {
+            if (b.closest('#mammouth-widget, #mw-sidebar, #mw-popover')) continue;
+            const card = b.closest('section, [class*="card"], article, div[class*="rounded"]');
+            out.progressbars.push({
+                ariaLabel: b.getAttribute('aria-label'),
+                valuenow: b.getAttribute('aria-valuenow'),
+                valuetext: b.getAttribute('aria-valuetext'),
+                innerWidths: [...b.querySelectorAll('[style*="width"]')].map(e => e.getAttribute('style')).slice(0, 3),
+                nomTrouve: (() => { try { return findModelNameForBar(b); } catch { return 'err'; } })(),
+                texteCarte: card ? String(card.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 160) : null,
+            });
+        }
+        try {
+            out.brandChips = brandFilterChips(document).map(c => ({ marque: c.brand, ariaLabel: c.el.getAttribute('aria-label'), pressed: c.el.getAttribute('aria-pressed'), state: c.el.getAttribute('data-state') }));
+            out.tousLesBoutonsAriaLabel = [...document.querySelectorAll('button[aria-label]')]
+                .filter(b => !b.closest('#mammouth-widget, #mw-sidebar, #mw-popover'))
+                .map(b => (b.getAttribute('aria-label') || '').slice(0, 70)).filter(Boolean).slice(0, 40);
+        } catch {}
+        for (const h of document.querySelectorAll('h1,h2,h3,h4,h5,[class*="font-semibold"],[class*="font-bold"]')) {
+            if (h.closest('#mammouth-widget, #mw-sidebar, #mw-popover, [role="progressbar"]')) continue;
+            const t = String(h.innerText || '').replace(/\s+/g, ' ').trim();
+            if (t && t.length < 70) out.headings.push(t);
+        }
+        out.headings = out.headings.slice(0, 30);
+        const cands = ['/api/user/recentUsage', '/api/user/currentUsage'];
+        out.api = cands.map(u => ({ url: u, _pending: true }));
+        Promise.all(cands.map(u => _origFetch(u, { credentials: 'include', cache: 'no-store' })
+            .then(r => r.json()).then(j => j).catch(e => ({ _err: String(e.message) }))))
+            .then(res => {
+                out.api = res;
+                console.log('%c[MammouthWidget] DIAGNOSTIC', 'color:#a29bfe;font-weight:700');
+                console.log(JSON.stringify(out, null, 2));
+                window.__mwLastDiag = out;
+                const blob = new Blob([JSON.stringify(out, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url; a.download = 'mammouth-diag.json'; a.click();
+                setTimeout(() => URL.revokeObjectURL(url), 1000);
+                console.log('%c[mw] diagnostic téléchargé (mammouth-diag.json) + stocké dans window.__mwLastDiag', 'color:#2ed573');
+            });
+        console.log('[mw] diagnostic en cours… (télécharge mammouth-diag.json)');
+        return out;
+    }
 
-    console.log('[MammouthWidget] Quota Tracker v14.22 chargé');
+    window.__mwTest = buildTestSuite();
+
+    console.log('[MammouthWidget] Quota Tracker v15.17 chargé');
+    console.log('[MammouthWidget] diagnostic : __mwDebug.buildRings() · tests : __mwTest.run()');
 })();
