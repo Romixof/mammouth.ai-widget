@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mammouth AI - Quota Tracker
 // @namespace    http://tampermonkey.net/
-// @version      15.20
+// @version      15.21
 // @description  Quota Tracker mammouth.ai — quota global (pool), fenêtre glissante 3h en base TEMPS, quota par modèle.
 // @author       Romixo
 // @match        *://*.mammouth.ai/*
@@ -645,8 +645,12 @@
         calibAmbigGraceMs: 90 * 1000,
 
         popupBrandPhaseMs: 7000,
-        popupBrandReadMs: 1400,
-        popupBrandRestoreMs: 800,
+        popupBrandEarlyMs: 2500,
+        popupBrandReadMs: 400,
+        popupBrandReadMaxMs: 4000,
+        popupBrandRestoreMs: 250,
+        popupBrandClearMaxMs: 3000,
+        popupTickMs: 250,
 
         gaugeCacheMs: 300,
         nameMapCacheMs: 500,
@@ -2329,6 +2333,7 @@
             const prev = readJSON(STORAGE_KEY_POPUP_GAUGE, null);
             const keep = prev && Array.isArray(prev.samples) && Date.now() - prev.ts <= 20 * 1000 ? prev.samples.slice(-5) : [];
             setJSON(STORAGE_KEY_POPUP_GAUGE, { ts: Date.now(), samples: keep.concat(pct) });
+            recordPopupGauge.sampled = Date.now();
         } catch {}
     }
     function readPoolGaugeUncached(doc) {
@@ -3035,6 +3040,7 @@
         const elapsed = Date.now() - st.startTs;
 
         recordPopupGauge(doc);
+        const gaugeSampled = (recordPopupGauge.sampled || 0) >= st.startTs;
         try {
             const secs = scanModelSections(doc);
             st.lastScan = secs;
@@ -3082,7 +3088,7 @@
                 else gentleScrollPopup(w, doc, st);
             }
 
-            if (elapsed > CFG.popupBrandPhaseMs) {
+            if (elapsed > CFG.popupBrandPhaseMs || (elapsed > CFG.popupBrandEarlyMs && gaugeSampled)) {
                 const chips = brandFilterChips(doc);
                 if (chips.length && count === 0) {
                     st.phase = 'brands'; st.chips = chips; st.idx = 0; st.step = 0; st.waitUntil = 0; st.visited = {};
@@ -3115,7 +3121,7 @@
                 return close(complete ? 'ok (toutes les marques lues)' : 'ok (marques lues, filtre restauré partiellement)', complete);
             }
             if (st.step === 0) {
-
+                if (st.clearDeadline && Date.now() < st.clearDeadline && scanModelSections(doc).length) return 'en cours';
                 const fresh = brandFilterChips(doc);
                 if (!fresh.length) {
                     console.log('[MammouthWidget] popup : pastilles disparues → retour au scan passif');
@@ -3135,7 +3141,7 @@
                 st.visited[chip.brand.toLowerCase()] = true;
                 notePoolActivity();
                 try { chip.el.click(); } catch { return 'en cours'; }
-                st.step = 1;
+                st.step = 1; st.lastSig = ''; st.readDeadline = Date.now() + CFG.popupBrandReadMaxMs;
                 st.waitUntil = Date.now() + CFG.popupBrandReadMs;
                 popupBanner(doc, 'marque ' + (st.idx + 1) + '/' + fresh.length + ' : ' + chip.brand + '…');
                 console.log('[MammouthWidget] popup — filtre marque « ' + chip.brand + ' » (' + (st.idx + 1) + '/' + fresh.length + ')');
@@ -3144,6 +3150,8 @@
 
             const chip = (st.chips || []).find(c => c.brand === st.lastBrand) || { brand: st.lastBrand, el: null };
             const secs = scanModelSections(doc);
+            const sig = secs.map(x => x.name + ':' + x.pct).join('|');
+            if (Date.now() < st.readDeadline && (!secs.length || sig !== st.lastSig)) { st.lastSig = sig; return 'en cours'; }
             for (const sec of secs) st.accum[sec.name] = sec.pct;
             const cumul = Object.keys(st.accum).length;
             if (cumul > st.best) { st.best = cumul; st.stable = 0; }
@@ -3154,6 +3162,7 @@
                 + (secs.map(x => x.name).join(', ') || 'aucune jauge'));
             clearPopupFilter(doc, chip);
             st.step = 0; st.idx++;
+            st.clearDeadline = Date.now() + CFG.popupBrandClearMaxMs;
             st.waitUntil = Date.now() + CFG.popupBrandRestoreMs;
             if (chip.el) st.brandRestored = true;
             return 'en cours';
@@ -3254,7 +3263,7 @@
         setTimeout(() => applyPopupRect(w, W, H), 600);
         setTimeout(() => { try { if (window.focus) window.focus(); } catch {} }, 60);
         _popupHarvest = { win: w, startTs: Date.now(), lastGrowthTs: Date.now(), lastCount: 0, accum: {}, lastScan: [], best: 0, stable: 0, steps: 0, lastStepTs: 0, lastAssistTs: 0, triedLabels: [], timer: 0, phase: 'passive', chips: null, idx: 0, step: 0, waitUntil: 0, brandRestored: true, visited: {}, lastBrand: null };
-        _popupHarvest.timer = setInterval(popupHarvestTick, 700);
+        _popupHarvest.timer = setInterval(popupHarvestTick, CFG.popupTickMs);
         console.log('[MammouthWidget] petite fenêtre harvest ouverte (coin bas-droit) — lecture, parcours des marques, puis fermeture automatique ; ta page reste intacte');
         return true;
     }
@@ -4797,6 +4806,6 @@
 
     window.__mwTest = buildTestSuite();
 
-    console.log('[MammouthWidget] Quota Tracker v15.20 chargé');
+    console.log('[MammouthWidget] Quota Tracker v15.21 chargé');
     console.log('[MammouthWidget] diagnostic : __mwDebug.buildRings() · tests : __mwTest.run()');
 })();
