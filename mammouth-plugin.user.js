@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mammouth AI - Quota Tracker
 // @namespace    http://tampermonkey.net/
-// @version      15.18
+// @version      15.19
 // @description  Quota Tracker mammouth.ai — quota global (pool), fenêtre glissante 3h en base TEMPS, quota par modèle.
 // @author       Romixo
 // @match        *://*.mammouth.ai/*
@@ -2309,9 +2309,23 @@
     function recordPopupGauge(doc) {
         try {
             const g = readPoolGaugeUncached(doc);
-            if (!g || detectBrandFilterActive(g.bar)) return;
-            const pct = g.ambiguous ? g.round : g.precise;
-            if (pct == null) return;
+            if (!g) {
+                if (Date.now() - (recordPopupGauge.noGaugeTs || 0) > 15000) {
+                    recordPopupGauge.noGaugeTs = Date.now();
+                    console.log('[MammouthWidget] fenêtre harvest : aucune jauge pool reconnue sur la page');
+                }
+                return;
+            }
+            if (detectBrandFilterActive(g.bar)) return;
+            const usable = v => v != null && v > 0.2 && v < 100;
+            const pct = [g.ambiguous ? g.round : g.precise, g.round].find(usable);
+            if (pct === undefined) {
+                if (Date.now() - (recordPopupGauge.logTs || 0) > 15000) {
+                    recordPopupGauge.logTs = Date.now();
+                    console.log('[MammouthWidget] jauge pool vue dans la fenêtre mais inutilisable : aria-valuenow=' + g.round + ', largeur=' + g.precise + (g.ambiguous ? ' (ambiguë)' : ''));
+                }
+                return;
+            }
             const prev = readJSON(STORAGE_KEY_POPUP_GAUGE, null);
             const keep = prev && Array.isArray(prev.samples) && Date.now() - prev.ts <= 20 * 1000 ? prev.samples.slice(-5) : [];
             setJSON(STORAGE_KEY_POPUP_GAUGE, { ts: Date.now(), samples: keep.concat(pct) });
@@ -4783,6 +4797,6 @@
 
     window.__mwTest = buildTestSuite();
 
-    console.log('[MammouthWidget] Quota Tracker v15.18 chargé');
+    console.log('[MammouthWidget] Quota Tracker v15.19 chargé');
     console.log('[MammouthWidget] diagnostic : __mwDebug.buildRings() · tests : __mwTest.run()');
 })();
