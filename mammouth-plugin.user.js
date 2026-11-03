@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mammouth AI - Quota Tracker
 // @namespace    http://tampermonkey.net/
-// @version      15.17
+// @version      15.18
 // @description  Quota Tracker mammouth.ai — quota global (pool), fenêtre glissante 3h en base TEMPS, quota par modèle.
 // @author       Romixo
 // @match        *://*.mammouth.ai/*
@@ -584,6 +584,7 @@
     const STORAGE_KEY_LEDGER_CLEARED = 'mammouth_ledger_cleared_ts';
     const STORAGE_KEY_LAST_CALIBRATION = 'mammouth_last_calibration';
     const STORAGE_KEY_CALIB_STATE = 'mammouth_calibrator_state';
+    const STORAGE_KEY_POPUP_GAUGE = 'mammouth_popup_gauge';
     const STORAGE_KEY_MODEL_QUOTA = 'mammouth_model_quota';
     const STORAGE_KEY_MODEL_MISSES = 'mammouth_model_quota_misses';
     const STORAGE_KEY_SCHEMA = 'mammouth_schema_version';
@@ -656,7 +657,7 @@
     };
 
     // Plafond par plan
-    const PLAN_POOL_CENTS = { standard: 450 };
+    const PLAN_POOL_CENTS = { standard: 450, expert: 1500 };
     const PLAN_POOL_TOLERANCE = 0.12;
     function getRefusedPlans() {
         const r = readJSON(STORAGE_KEY_PLAN_REFUSED, []);
@@ -1965,7 +1966,11 @@
 
             const g = readPoolGauge();
 
-            if (!g) { this._defer('jauge pool absente', true); return null; }
+            if (!g) {
+                const pg = freshPopupGauge();
+                if (!pg) { this._defer('jauge pool absente', true); return null; }
+                return this._commitFromPopup(pg);
+            }
             const brandFilterActive = (() => { try { return detectBrandFilterActive(g.bar); } catch { return false; } })();
             if (brandFilterActive) { this._defer('jauge pool filtrée (marque active)', true); return null; }
             if (g.ambiguous) {
@@ -1999,7 +2004,23 @@
             s.lastRunTs = Date.now();
             if (s.reads.length < CFG.calibSettleReads) { this.save(); return null; }
 
-            const pcts = s.reads.map(r => r.pct);
+            return this._commit(s.reads.map(r => r.pct), raw);
+        },
+
+        _commitFromPopup(pg) {
+            const s = this.state();
+            const pcts = pg.samples.filter(p => p > 0.2 && p < 100);
+            if (!pcts.length) { this._defer('jauge lue dans la fenêtre illisible', true); return null; }
+            const mean = pcts.reduce((a, b) => a + b, 0) / pcts.length;
+            if (poolReadingImplausible(mean)) { this._defer('lecture pool incohérente avec l\'usage', true); logImplausiblePool(Math.round(mean)); return null; }
+            const raw = freshRawUsed();
+            if (raw === null || raw <= 0) { this._defer('usage brut inconnu'); return null; }
+            s.lastRunTs = Date.now();
+            return this._commit(pcts, raw);
+        },
+
+        _commit(pcts, raw) {
+            const s = this.state();
             const spread = Math.max(...pcts) - Math.min(...pcts);
             if (spread > CFG.calibMaxSpread) { this._defer('lectures instables (spread ' + spread.toFixed(2) + ' %)', true); return null; }
 
@@ -2280,8 +2301,24 @@
         _gaugeCache = { ts: now, sig: val ? sig : _gaugeCache.sig, val };
         return val;
     }
-    function readPoolGaugeUncached() {
-        const { pool } = classifyQuotaBars();
+    function freshPopupGauge() {
+        const v = readJSON(STORAGE_KEY_POPUP_GAUGE, null);
+        if (!v || !Array.isArray(v.samples) || !v.samples.length) return null;
+        return Date.now() - v.ts <= 3 * 60 * 1000 ? v : null;
+    }
+    function recordPopupGauge(doc) {
+        try {
+            const g = readPoolGaugeUncached(doc);
+            if (!g || detectBrandFilterActive(g.bar)) return;
+            const pct = g.ambiguous ? g.round : g.precise;
+            if (pct == null) return;
+            const prev = readJSON(STORAGE_KEY_POPUP_GAUGE, null);
+            const keep = prev && Array.isArray(prev.samples) && Date.now() - prev.ts <= 20 * 1000 ? prev.samples.slice(-5) : [];
+            setJSON(STORAGE_KEY_POPUP_GAUGE, { ts: Date.now(), samples: keep.concat(pct) });
+        } catch {}
+    }
+    function readPoolGaugeUncached(doc) {
+        const { pool } = classifyQuotaBars(doc);
         if (!pool) return null;
         let round = null;
         const nowAttr = pool.getAttribute('aria-valuenow');
@@ -2983,6 +3020,7 @@
         }
         const elapsed = Date.now() - st.startTs;
 
+        recordPopupGauge(doc);
         try {
             const secs = scanModelSections(doc);
             st.lastScan = secs;
@@ -4745,6 +4783,6 @@
 
     window.__mwTest = buildTestSuite();
 
-    console.log('[MammouthWidget] Quota Tracker v15.17 chargé');
+    console.log('[MammouthWidget] Quota Tracker v15.18 chargé');
     console.log('[MammouthWidget] diagnostic : __mwDebug.buildRings() · tests : __mwTest.run()');
 })();
