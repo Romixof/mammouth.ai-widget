@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mammouth AI - Quota Tracker
 // @namespace    http://tampermonkey.net/
-// @version      15.19
+// @version      15.20
 // @description  Quota Tracker mammouth.ai — quota global (pool), fenêtre glissante 3h en base TEMPS, quota par modèle.
 // @author       Romixo
 // @match        *://*.mammouth.ai/*
@@ -420,7 +420,7 @@
                     <button class="mw-btn-sm" id="mw-btn-simulate">Test timer</button>
                 </div>
                 <div class="mw-setting-row">
-                    <label title="Le quota par modèle se relit tout seul ~12 s après chaque réponse (petite fenêtre qui s'ouvre et se ferme). Désactiver si tu préfères ne lire les quotas par modèle qu'à la demande.">Modèles auto</label>
+                    <label title="Si activé, le quota par modèle se relit ~12 s après chaque réponse via une petite fenêtre qui prend le focus clavier (elle peut interrompre ta saisie). Par défaut : à la demande avec le bouton 📥.">Modèles auto</label>
                     <button class="mw-btn-sm" id="mw-btn-model-auto">Auto</button>
                 </div>
                 <div class="mw-setting-row">
@@ -1057,7 +1057,7 @@
 
     function apiEnabled() { return localStorage.getItem(STORAGE_KEY_API_ENABLED) !== 'off'; }
 
-    function modelAutoEnabled() { return localStorage.getItem(STORAGE_KEY_MODEL_AUTO) !== 'off'; }
+    function modelAutoEnabled() { return localStorage.getItem(STORAGE_KEY_MODEL_AUTO) === 'on'; }
     function setModelAuto(on) { localStorage.setItem(STORAGE_KEY_MODEL_AUTO, on ? 'on' : 'off'); syncModelAutoButton(); }
     function setApiEnabled(on) { localStorage.setItem(STORAGE_KEY_API_ENABLED, on ? 'on' : 'off'); }
 
@@ -4797,6 +4797,6 @@
 
     window.__mwTest = buildTestSuite();
 
-    console.log('[MammouthWidget] Quota Tracker v15.19 chargé');
+    console.log('[MammouthWidget] Quota Tracker v15.20 chargé');
     console.log('[MammouthWidget] diagnostic : __mwDebug.buildRings() · tests : __mwTest.run()');
 })();
